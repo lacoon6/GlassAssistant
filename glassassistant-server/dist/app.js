@@ -31,7 +31,9 @@ app.use(session({
         maxAge: 30 * 24 * 60 * 60 * 1_000,
     },
 }));
-app.get('/health', (_request, response) => response.json({ status: 'ok' }));
+app.get('/health', (_request, response) => {
+    response.status(200).type('application/json').json({ status: 'ok' });
+});
 app.use('/api/auth', authRouter);
 app.use('/api/discord', discordRouter);
 app.use((error, _request, response, _next) => {

@@ -1,8 +1,9 @@
-export default {
+module.exports = {
   apps: [
     {
       name: 'glassassistant-server',
       script: './dist/app.js',
+      interpreter: 'node',
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
@@ -10,7 +11,7 @@ export default {
       max_memory_restart: '300M',
       restart_delay: 3000,
       time: true,
-      env_production: {
+      env: {
         NODE_ENV: 'production',
         TRUST_PROXY: 'true',
       },

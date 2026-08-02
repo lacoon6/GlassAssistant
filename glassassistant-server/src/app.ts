@@ -35,7 +35,9 @@ app.use(
   }),
 )
 
-app.get('/health', (_request, response) => response.json({ status: 'ok' }))
+app.get('/health', (_request, response) => {
+  response.status(200).type('application/json').json({ status: 'ok' })
+})
 app.use('/api/auth', authRouter)
 app.use('/api/discord', discordRouter)
 
