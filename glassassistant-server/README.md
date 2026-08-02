@@ -5,9 +5,8 @@ Node.js, Express, and TypeScript backend for Glass Assistant. Discord OAuth toke
 ## Setup
 
 1. Copy `.env.example` to `.env` and fill in every value.
-2. In the Discord Developer Portal, add `DISCORD_REDIRECT_URI` as an exact OAuth2 redirect URL.
-3. Use a Discord application client ID and secret. The login requests the `identify` and `guilds` scopes and uses Authorization Code Flow with PKCE.
-4. Install and run:
+2. Add `DISCORD_REDIRECT_URI` as an exact redirect URL in the Discord Developer Portal.
+3. Install dependencies and start development:
 
 ```bash
 npm install
@@ -24,13 +23,13 @@ The frontend must set `VITE_API_URL` to this server's public HTTPS origin.
 - `GET /api/discord/servers` — returns the signed-in user's servers.
 - `GET /api/discord/channels?guildId=...` — returns channels for a server.
 - `GET /api/discord/messages?channelId=...` — returns the latest 50 messages.
-- `GET /health` — health check for deployment monitoring.
+- `GET /health` — deployment health check.
 
-Discord endpoints return `401` when the session is absent or cannot be refreshed. Access tokens, refresh tokens, expiration, OAuth state, and the PKCE verifier are stored only in the server session.
+## ConoHa VPS deployment with Apache
 
-## ConoHa VPS deployment
+The production target uses the existing Apache2 server. Point `api.nobutv.org` to the VPS and allow inbound ports 22, 80, and 443 in the ConoHa firewall.
 
-Point an API subdomain to the ConoHa VPS, allow inbound TCP ports 22, 80, and 443 in the ConoHa security group/firewall, and install Git, Docker Engine, the Docker Compose plugin, Nginx, and Certbot. Clone the repository, enter `glassassistant-server`, copy `.env.production.example` to `.env`, and replace every example value. In production use:
+Copy `.env.production.example` to `.env` and configure:
 
 ```env
 NODE_ENV=production
@@ -39,69 +38,90 @@ TRUST_PROXY=true
 FRONTEND_URL=https://your-even-hub-frontend.example
 DISCORD_CLIENT_ID=your_client_id
 DISCORD_CLIENT_SECRET=your_client_secret
-DISCORD_REDIRECT_URI=https://api.example.com/api/auth/callback
+DISCORD_REDIRECT_URI=https://api.nobutv.org/api/auth/callback
 SESSION_SECRET=a_cryptographically_random_secret_of_at_least_32_characters
-REDIS_URL=redis://redis:6379
+REDIS_URL=redis://127.0.0.1:6379
 ```
 
-Register `DISCORD_REDIRECT_URI` exactly in the Discord Developer Portal. Keep `.env` readable only by the deployment user. Deploy the Docker stack with:
-
-```bash
-chmod +x deployment.sh update.sh
-./deployment.sh
-```
-
-Docker Compose binds Node only to `127.0.0.1:3000`, persists sessions in Redis, checks application health, and applies `restart: unless-stopped` for automatic restart after crashes or VPS reboots.
+Register `https://api.nobutv.org/api/auth/callback` exactly in the Discord Developer Portal. Restrict `.env` permissions and never expose its secrets to the frontend.
 
 ### PM2
 
-PM2 is an alternative when running Node directly instead of Docker. Install and build, run Redis locally, set `REDIS_URL=redis://127.0.0.1:6379`, then start the supplied ecosystem file:
+Install Node.js, Redis, and PM2. The default production deployment uses PM2:
 
 ```bash
-npm ci
-npm run build
+sudo systemctl enable --now redis-server
 npm install --global pm2
-pm2 start ecosystem.config.js --env production
-pm2 save
+chmod +x deployment.sh update.sh
+./deployment.sh
 pm2 startup
 ```
 
-Run the command printed by `pm2 startup`, then run `pm2 save` again. The ecosystem configuration enables automatic restart, a restart delay, memory limits, and timestamped logs. Do not run the Docker app service and PM2 simultaneously on port 3000.
+Run the command printed by `pm2 startup`, then run `pm2 save`. PM2 uses [ecosystem.config.js](./ecosystem.config.js), automatically restarts crashes, delays rapid restarts, and restarts the process if it exceeds the memory limit.
 
-### Nginx
+### Apache VirtualHost
 
-Copy `nginx.conf` to `/etc/nginx/sites-available/glassassistant`, replace every `api.glassassistant.example.com` with the real API hostname, enable it, and validate the configuration:
+The supplied [apache-vhost.conf](./apache-vhost.conf) contains:
 
-```bash
-sudo ln -s /etc/nginx/sites-available/glassassistant /etc/nginx/sites-enabled/glassassistant
-sudo nginx -t
-sudo systemctl reload nginx
+```apache
+ServerName api.nobutv.org
+ProxyPass / http://127.0.0.1:3000/
+ProxyPassReverse / http://127.0.0.1:3000/
 ```
 
-Nginx terminates TLS and forwards the host, client address, and original HTTPS protocol to Express. `TRUST_PROXY=true` is required so Express can issue Secure session cookies behind this proxy.
+Enable the required Apache modules:
+
+```bash
+sudo a2enmod proxy proxy_http rewrite ssl
+sudo systemctl reload apache2
+```
+
+Apache terminates HTTPS and proxies requests to PM2 on `127.0.0.1:3000`. Keep `TRUST_PROXY=true` so Express recognizes the secure proxy connection and issues Secure session cookies.
 
 ### Let's Encrypt
 
-Before enabling the TLS server block for the first certificate, serve the domain over port 80 and obtain a certificate:
+Apache provides HTTPS. Before enabling the supplied TLS VirtualHost, obtain the certificate using the already-running Apache server:
 
 ```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d api.example.com
+sudo apt install certbot python3-certbot-apache
+sudo certbot --apache -d api.nobutv.org
 sudo certbot renew --dry-run
 ```
 
-Certbot installs automatic renewal through systemd. After the certificate exists, use the supplied TLS paths (updated for the real hostname), run `sudo nginx -t`, and reload Nginx.
+Certbot enables automatic renewal through systemd. Once `/etc/letsencrypt/live/api.nobutv.org/` exists, install and enable the supplied VirtualHost:
+
+```bash
+sudo cp apache-vhost.conf /etc/apache2/sites-available/glassassistant.conf
+sudo a2ensite glassassistant.conf
+sudo apache2ctl configtest
+sudo systemctl reload apache2
+```
 
 ### Auto restart
 
-Docker uses `restart: unless-stopped`; Redis data lives in the `redis-data` volume. For PM2, `pm2 startup` plus `pm2 save` restores the process after reboot. Enable Nginx and Docker at boot with `sudo systemctl enable --now nginx docker`.
+Run `pm2 startup` and `pm2 save` to restore Glass Assistant after a VPS reboot. Enable Apache and Redis at boot:
+
+```bash
+sudo systemctl enable apache2 redis-server
+```
 
 ### Auto update
 
-`update.sh` performs a fast-forward-only Git pull, rebuilds images, recreates changed containers, removes unused images, and prints service health. Run it manually first. To check for updates every 15 minutes, add this deployment-user cron entry:
+`update.sh` performs a fast-forward-only pull, installs locked dependencies, builds TypeScript, and gracefully reloads PM2. Test it manually, then optionally schedule it for the deployment user:
 
 ```cron
 */15 * * * * /absolute/path/to/glassassistant-server/update.sh >> /var/log/glassassistant-update.log 2>&1
 ```
 
-Only enable unattended updates after protecting the deployment branch and confirming that rollback and backups meet your operational requirements. Redis sessions survive application replacement through the named volume.
+Only enable unattended updates after establishing backups and rollback procedures.
+
+### Optional Docker deployment
+
+Docker remains available as an alternative to PM2:
+
+```bash
+docker compose build --pull
+docker compose up -d
+```
+
+Compose binds the application to `127.0.0.1:3000`, runs Redis with persistent storage, performs health checks, and restarts containers automatically. Apache uses the same VirtualHost configuration. Do not run PM2 and the Docker app simultaneously because both bind port 3000.

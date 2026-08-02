@@ -3,8 +3,7 @@ set -eu
 
 cd "$(dirname "$0")"
 git pull --ff-only
-docker compose config --quiet
-docker compose build --pull
-docker compose up -d --remove-orphans
-docker image prune -f
-docker compose ps
+npm ci
+npm run build
+pm2 reload ecosystem.config.js --env production
+pm2 save
