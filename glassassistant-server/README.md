@@ -57,7 +57,7 @@ chmod +x deployment.sh update.sh
 pm2 startup
 ```
 
-Run the command printed by `pm2 startup`, then run `pm2 save`. PM2 uses [ecosystem.config.js](./ecosystem.config.js), automatically restarts crashes, delays rapid restarts, and restarts the process if it exceeds the memory limit.
+Run the command printed by `pm2 startup`, then run `pm2 save`. PM2 uses [ecosystem.config.cjs](./ecosystem.config.cjs), automatically restarts crashes, delays rapid restarts, and restarts the process if it exceeds the memory limit.
 
 ### Apache VirtualHost
 
