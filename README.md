@@ -35,7 +35,10 @@ Then either:
 npm run pack
 ```
 
-Produces an `.ehpk` file.
+The default `npm run build` keeps the `/app/` asset base used by the production
+site and writes to `dist`. Packaging runs the separate `build:ehpk` target,
+which uses relative asset URLs and writes to `dist-ehpk` before producing the
+versioned `.ehpk` file.
 
 ## What's in here
 

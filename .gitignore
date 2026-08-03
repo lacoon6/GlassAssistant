@@ -14,3 +14,5 @@ node_modules/
 **/.codex-vps-known-hosts
 *.ehpk
 **/*.ehpk
+/dist-ehpk/
+/simulator-*-v*.png

@@ -3,6 +3,7 @@ import {
   type EvenAppBridge,
   type EvenHubEvent,
   OsEventTypeList,
+  StartUpPageCreateResult,
 } from '@evenrealities/even_hub_sdk'
 import { Page, PageAction, PageId } from './page'
 import { ChannelPage } from './pages/channel'
@@ -60,7 +61,11 @@ export class App {
       }),
     )
 
-    console.log('Page created:', result === 0 ? 'success' : `failed (${result})`)
+    if (result !== StartUpPageCreateResult.success) {
+      throw new Error(`createStartUpPageContainer failed with result ${result}`)
+    }
+
+    console.log('createStartUpPageContainer success')
     this.unsubscribe = this.bridge.onEvenHubEvent(event => void this.handleEvent(event))
   }
 
