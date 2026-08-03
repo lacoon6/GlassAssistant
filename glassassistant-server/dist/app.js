@@ -16,7 +16,7 @@ if (redisClient) {
 if (env.trustProxy)
     app.set('trust proxy', 1);
 app.disable('x-powered-by');
-app.use(cors({ origin: env.frontendUrl, credentials: true }));
+app.use(cors({ origin: env.frontendOrigin, credentials: true }));
 app.use(express.json({ limit: '32kb' }));
 app.use(session({
     name: 'glassassistant.sid',

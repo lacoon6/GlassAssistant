@@ -33,7 +33,7 @@ Copy `.env.production.example` to `.env` and configure:
 
 ```env
 NODE_ENV=production
-PORT=3000
+PORT=3100
 TRUST_PROXY=true
 FRONTEND_URL=https://your-even-hub-frontend.example
 DISCORD_CLIENT_ID=your_client_id
@@ -65,8 +65,8 @@ The supplied [apache-vhost.conf](./apache-vhost.conf) contains:
 
 ```apache
 ServerName api.nobutv.org
-ProxyPass / http://127.0.0.1:3000/
-ProxyPassReverse / http://127.0.0.1:3000/
+ProxyPass / http://127.0.0.1:3100/
+ProxyPassReverse / http://127.0.0.1:3100/
 ```
 
 Enable the required Apache modules:
@@ -76,7 +76,7 @@ sudo a2enmod proxy proxy_http rewrite ssl
 sudo systemctl reload apache2
 ```
 
-Apache terminates HTTPS and proxies requests to PM2 on `127.0.0.1:3000`. Keep `TRUST_PROXY=true` so Express recognizes the secure proxy connection and issues Secure session cookies.
+Apache terminates HTTPS and proxies requests to PM2 on `127.0.0.1:3100`. Keep `TRUST_PROXY=true` so Express recognizes the secure proxy connection and issues Secure session cookies.
 
 ### Let's Encrypt
 
@@ -124,4 +124,4 @@ docker compose build --pull
 docker compose up -d
 ```
 
-Compose binds the application to `127.0.0.1:3000`, runs Redis with persistent storage, performs health checks, and restarts containers automatically. Apache uses the same VirtualHost configuration. Do not run PM2 and the Docker app simultaneously because both bind port 3000.
+Compose binds the application to `127.0.0.1:3100`, runs Redis with persistent storage, performs health checks, and restarts containers automatically. Apache uses the same VirtualHost configuration. Do not run PM2 and the Docker app simultaneously because both bind port 3100.

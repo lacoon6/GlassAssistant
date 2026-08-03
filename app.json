@@ -2,10 +2,16 @@
   "package_id": "com.glassassistant.app",
   "edition": "202601",
   "name": "Glass Assistant",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.10",
   "entrypoint": "index.html",
-  "permissions": [],
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Connects to the Glass Assistant backend and Discord data.",
+      "whitelist": ["https://api.nobutv.org"]
+    }
+  ],
   "supported_languages": ["en"]
 }
