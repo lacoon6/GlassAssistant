@@ -38,7 +38,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/discord', discordRouter);
 app.use((error, _request, response, _next) => {
     if (error instanceof DiscordApiError) {
-        response.status(error.status === 401 || error.status === 403 ? 401 : 502).json({ error: error.message });
+        response.status(error.status).json({ error: error.code });
         return;
     }
     console.error(error);

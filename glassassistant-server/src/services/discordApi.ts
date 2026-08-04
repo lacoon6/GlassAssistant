@@ -25,13 +25,19 @@ interface DiscordMessage {
 }
 
 export class DiscordApiService {
+  public constructor(private readonly botToken: string) {}
+
   public async getServers(accessToken: string): Promise<unknown> {
-    const guilds = await this.get<DiscordGuild[]>('/users/@me/guilds', accessToken)
+    const guilds = await this.getUserGuilds(accessToken)
     return guilds.map(guild => ({ id: guild.id, name: guild.name, unreadCount: 0 }))
   }
 
   public async getChannels(accessToken: string, guildId: string): Promise<unknown> {
-    const channels = await this.get<DiscordChannel[]>(`/guilds/${encodeURIComponent(guildId)}/channels`, accessToken)
+    await this.requireGuildMembership(accessToken, guildId)
+    const channels = await this.getWithBot<DiscordChannel[]>(
+      `/guilds/${encodeURIComponent(guildId)}/channels`,
+      'guildChannels',
+    )
     return channels.map(channel => ({
       id: channel.id,
       guildId: channel.guild_id ?? guildId,
@@ -44,9 +50,15 @@ export class DiscordApiService {
   }
 
   public async getMessages(accessToken: string, channelId: string): Promise<unknown> {
-    const messages = await this.get<DiscordMessage[]>(
+    const channel = await this.getWithBot<DiscordChannel>(
+      `/channels/${encodeURIComponent(channelId)}`,
+      'channel',
+    )
+    if (!channel.guild_id) throw new DiscordApiError(403, 'GUILD_CHANNEL_REQUIRED')
+    await this.requireGuildMembership(accessToken, channel.guild_id)
+    const messages = await this.getWithBot<DiscordMessage[]>(
       `/channels/${encodeURIComponent(channelId)}/messages?limit=50`,
-      accessToken,
+      'messages',
     )
     return messages.map(message => ({
       id: message.id,
@@ -56,17 +68,50 @@ export class DiscordApiService {
     }))
   }
 
-  private async get<T>(path: string, accessToken: string): Promise<T> {
+  private async getUserGuilds(accessToken: string): Promise<DiscordGuild[]> {
+    return this.get<DiscordGuild[]>('/users/@me/guilds', `Bearer ${accessToken}`, 'userGuilds')
+  }
+
+  private async requireGuildMembership(accessToken: string, guildId: string): Promise<void> {
+    const guilds = await this.getUserGuilds(accessToken)
+    if (!guilds.some(guild => guild.id === guildId)) throw new DiscordApiError(403, 'USER_NOT_IN_GUILD')
+  }
+
+  private async getWithBot<T>(path: string, operation: DiscordOperation): Promise<T> {
+    return this.get<T>(path, `Bot ${this.botToken}`, operation)
+  }
+
+  private async get<T>(path: string, authorization: string, operation: DiscordOperation): Promise<T> {
     const response = await fetch(`${apiBaseUrl}${path}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: authorization },
     })
-    if (!response.ok) throw new DiscordApiError(response.status)
+    if (!response.ok) throw mapDiscordError(response.status, operation)
     return (await response.json()) as T
   }
 }
 
+type DiscordOperation = 'userGuilds' | 'guildChannels' | 'channel' | 'messages'
+
+export type DiscordErrorCode = 'BOT_NOT_IN_GUILD' | 'BOT_CHANNEL_ACCESS_DENIED' |
+  'MESSAGE_HISTORY_ACCESS_DENIED' | 'BOT_TOKEN_INVALID' | 'USER_TOKEN_INVALID' |
+  'USER_NOT_IN_GUILD' | 'GUILD_CHANNEL_REQUIRED' | 'DISCORD_API_UNAVAILABLE'
+
 export class DiscordApiError extends Error {
-  public constructor(public readonly status: number) {
-    super(`Discord API request failed with status ${status}`)
+  public constructor(public readonly status: number, public readonly code: DiscordErrorCode) {
+    super(code)
   }
+}
+
+function mapDiscordError(status: number, operation: DiscordOperation): DiscordApiError {
+  if (operation === 'userGuilds') {
+    return status === 401 ? new DiscordApiError(401, 'USER_TOKEN_INVALID') :
+      new DiscordApiError(502, 'DISCORD_API_UNAVAILABLE')
+  }
+  if (status === 401) return new DiscordApiError(502, 'BOT_TOKEN_INVALID')
+  if (operation === 'guildChannels' && status === 404) return new DiscordApiError(403, 'BOT_NOT_IN_GUILD')
+  if (operation === 'messages' && status === 403) return new DiscordApiError(403, 'MESSAGE_HISTORY_ACCESS_DENIED')
+  if ((operation === 'guildChannels' || operation === 'channel') && (status === 403 || status === 404)) {
+    return new DiscordApiError(403, 'BOT_CHANNEL_ACCESS_DENIED')
+  }
+  return new DiscordApiError(502, 'DISCORD_API_UNAVAILABLE')
 }

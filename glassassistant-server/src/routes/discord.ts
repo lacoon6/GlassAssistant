@@ -1,9 +1,10 @@
 import { Router } from 'express'
 import { requireDiscordAuth } from '../middleware/auth.js'
+import { env } from '../config/env.js'
 import { DiscordApiService } from '../services/discordApi.js'
 
 export const discordRouter = Router()
-const discord = new DiscordApiService()
+const discord = new DiscordApiService(env.discordBotToken)
 
 discordRouter.use(requireDiscordAuth)
 

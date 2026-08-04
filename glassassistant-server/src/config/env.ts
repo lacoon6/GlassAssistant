@@ -9,6 +9,7 @@ export interface Environment {
   readonly frontendOrigin: string
   readonly discordClientId: string
   readonly discordClientSecret: string
+  readonly discordBotToken: string
   readonly discordRedirectUri: string
   readonly sessionSecret: string
   readonly redisUrl?: string
@@ -37,6 +38,7 @@ export const env: Environment = {
   ...frontend,
   discordClientId: required('DISCORD_CLIENT_ID'),
   discordClientSecret: required('DISCORD_CLIENT_SECRET'),
+  discordBotToken: required('DISCORD_BOT_TOKEN'),
   discordRedirectUri: required('DISCORD_REDIRECT_URI'),
   sessionSecret: required('SESSION_SECRET'),
   redisUrl: process.env.REDIS_URL?.trim() || undefined,
