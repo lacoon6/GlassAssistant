@@ -2,26 +2,20 @@ import type { DiscordChannel } from '../models/channel'
 import type { DiscordRepository } from '../services/discord'
 
 export class GetChannelsUseCase {
-  private guildId: string | null = null
   private channels: readonly DiscordChannel[] = []
-  private status: 'loading' | 'fresh' | 'cached' | 'offline' | 'error' = 'loading'
+  private status: 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' = 'loading'
 
   public constructor(private readonly repository: DiscordRepository) {}
 
-  public SelectGuild(guildId: string): void {
-    this.guildId = guildId
-    this.channels = []
-    this.status = 'loading'
-  }
+  public SelectGuild(_guildId: string): void { this.channels = []; this.status = 'loading' }
+  public BeginLoad(): void { this.status = 'loading' }
 
   public async Load(): Promise<void> {
-    if (!this.guildId) {
-      this.channels = []
-      this.status = 'error'
-      return
-    }
-    const result = await this.repository.getChannels(this.guildId)
-    this.channels = result.channels
+    this.status = 'loading'
+    const result = await this.repository.getChannels()
+    this.channels = result.channels.filter(channel =>
+      (channel.kind === 'text' || channel.kind === 'announcement') && !channel.readOnly,
+    )
     this.status = result.status
   }
 
@@ -29,7 +23,7 @@ export class GetChannelsUseCase {
     return this.channels
   }
 
-  public GetStatus(): 'loading' | 'fresh' | 'cached' | 'offline' | 'error' {
+  public GetStatus(): 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' {
     return this.status
   }
 }

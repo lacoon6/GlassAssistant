@@ -73,3 +73,55 @@ test('Discord permission failures map to safe operation-specific codes', async (
     (error: unknown) => error instanceof DiscordApiError && error.code === 'BOT_CHANNEL_ACCESS_DENIED',
   )
 })
+
+test('default channels selects the only guild shared by user and bot and filters non-text types', async () => {
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    const authorization = new Headers(init?.headers).get('authorization')
+    if (url.endsWith('/users/@me/guilds') && authorization === 'Bearer user-token') {
+      return jsonResponse([{ id: 'shared', name: 'hidden' }, { id: 'user-only', name: 'hidden' }])
+    }
+    if (url.endsWith('/users/@me/guilds') && authorization === 'Bot bot-token') {
+      return jsonResponse([{ id: 'shared', name: 'hidden' }])
+    }
+    return jsonResponse([
+      { id: 'text', guild_id: 'shared', name: 'text', type: 0 },
+      { id: 'announcement', guild_id: 'shared', name: 'announcement', type: 5 },
+      { id: 'category', guild_id: 'shared', name: 'category', type: 4 },
+      { id: 'voice', guild_id: 'shared', name: 'voice', type: 2 },
+    ])
+  }
+  const channels = await new DiscordApiService('bot-token').getDefaultChannels('user-token') as Array<{ type: number }>
+  assert.deepEqual(channels.map(channel => channel.type), [0, 5])
+})
+
+test('multiple shared guilds require explicit target configuration', async () => {
+  globalThis.fetch = async () => jsonResponse([{ id: 'one', name: 'hidden' }, { id: 'two', name: 'hidden' }])
+  await assert.rejects(
+    new DiscordApiService('bot-token').getDefaultChannels('user-token'),
+    (error: unknown) => error instanceof DiscordApiError && error.code === 'DISCORD_TARGET_GUILD_REQUIRED',
+  )
+})
+
+test('configured target requires both user and bot membership', async () => {
+  let call = 0
+  globalThis.fetch = async () => { call += 1; return jsonResponse(call === 1 ? [{ id: 'target', name: 'hidden' }] : []) }
+  await assert.rejects(
+    new DiscordApiService('bot-token').getDefaultChannels('user-token', 'target'),
+    (error: unknown) => error instanceof DiscordApiError && error.code === 'BOT_NOT_IN_GUILD',
+  )
+})
+
+test('messages expose timestamp and content-presence counts without changing auth order', async () => {
+  let call = 0
+  globalThis.fetch = async () => {
+    call += 1
+    if (call === 1) return jsonResponse({ id: 'channel', guild_id: 'guild', type: 0 })
+    if (call === 2) return jsonResponse([{ id: 'guild', name: 'hidden' }])
+    return jsonResponse([{ id: 'message', channel_id: 'channel', content: '', timestamp: '2026-08-05T00:00:00Z', attachments: [{}], embeds: [], author: { username: 'hidden' } }])
+  }
+  const messages = await new DiscordApiService('bot-token').getMessages('user-token', 'channel') as Array<{ attachmentCount: number; embedCount: number; timestamp: string }>
+  assert.deepEqual(messages.map(({ attachmentCount, embedCount, timestamp }) => ({ attachmentCount, embedCount, timestamp })), [
+    { attachmentCount: 1, embedCount: 0, timestamp: '2026-08-05T00:00:00Z' },
+  ])
+})

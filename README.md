@@ -1,6 +1,6 @@
-# minimal
+# Glass Assistant
 
-Bare Even Hub G2 starter. Vite + TypeScript + SDK + CLI + simulator, one text container that renders `Hello from G2!`.
+Glass Assistant 0.10.2 opens directly to Discord channels on Even G2.
 
 ## Run
 
@@ -15,10 +15,12 @@ The frontend sends credentials with backend requests and expects these routes:
 - `GET /api/auth/login`
 - `GET /api/auth/logout`
 - `GET /api/discord/servers`
+- `GET /api/discord/default/channels`
 - `GET /api/discord/channels?guildId={guildId}`
 - `GET /api/discord/messages?channelId={channelId}`
 
 Discord OAuth, token storage, refresh, and Discord REST requests belong entirely to the backend. The frontend never receives Discord access or refresh tokens.
+The G2 flow is channels to messages; server names and settings are not rendered on glasses. Selection state is stored as validated JSON through the public Even Hub SDK local-storage bridge.
 
 ```bash
 npm install
@@ -45,7 +47,7 @@ versioned `.ehpk` file.
 | File | Purpose |
 |---|---|
 | `index.html` | WebView host. Viewport meta tag locks zoom; CSS kills iOS double-tap zoom + rubber-band scroll. |
-| `src/main.ts` | Creates a single full-canvas text container at app startup. |
+| `src/main.ts` | Starts the Discord-only G2 flow and keeps phone-side diagnostics. |
 | `app.json` | Even Hub manifest. No permissions by default. |
 | `tsconfig.json` | Standard Vite vanilla-ts config. |
 | `vite.config.ts` | Dev server on port 5173, host binding for LAN QR access. |

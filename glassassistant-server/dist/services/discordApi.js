@@ -21,6 +21,10 @@ export class DiscordApiService {
             unreadCount: 0,
         }));
     }
+    async getDefaultChannels(accessToken, configuredGuildId) {
+        const guildId = await this.resolveTargetGuild(accessToken, configuredGuildId);
+        return this.getChannelsForGuild(guildId);
+    }
     async getMessages(accessToken, channelId) {
         const channel = await this.getWithBot(`/channels/${encodeURIComponent(channelId)}`, 'channel');
         if (!channel.guild_id)
@@ -32,6 +36,9 @@ export class DiscordApiService {
             channelId: message.channel_id,
             author: message.author.global_name ?? message.author.username,
             content: message.content,
+            timestamp: message.timestamp,
+            attachmentCount: message.attachments?.length ?? 0,
+            embedCount: message.embeds?.length ?? 0,
         }));
     }
     async getUserGuilds(accessToken) {
@@ -41,6 +48,39 @@ export class DiscordApiService {
         const guilds = await this.getUserGuilds(accessToken);
         if (!guilds.some(guild => guild.id === guildId))
             throw new DiscordApiError(403, 'USER_NOT_IN_GUILD');
+    }
+    async resolveTargetGuild(accessToken, configuredGuildId) {
+        const [userGuilds, botGuilds] = await Promise.all([
+            this.getUserGuilds(accessToken),
+            this.getWithBot('/users/@me/guilds', 'botGuilds'),
+        ]);
+        const userIds = new Set(userGuilds.map(guild => guild.id));
+        const botIds = new Set(botGuilds.map(guild => guild.id));
+        if (configuredGuildId) {
+            if (!userIds.has(configuredGuildId))
+                throw new DiscordApiError(403, 'USER_NOT_IN_GUILD');
+            if (!botIds.has(configuredGuildId))
+                throw new DiscordApiError(403, 'BOT_NOT_IN_GUILD');
+            return configuredGuildId;
+        }
+        const common = [...userIds].filter(id => botIds.has(id));
+        if (common.length === 0)
+            throw new DiscordApiError(403, 'BOT_NOT_IN_GUILD');
+        if (common.length > 1)
+            throw new DiscordApiError(409, 'DISCORD_TARGET_GUILD_REQUIRED');
+        return common[0];
+    }
+    async getChannelsForGuild(guildId) {
+        const channels = await this.getWithBot(`/guilds/${encodeURIComponent(guildId)}/channels`, 'guildChannels');
+        return channels.filter(channel => channel.type === 0 || channel.type === 5).map(channel => ({
+            id: channel.id,
+            guildId: channel.guild_id ?? guildId,
+            name: channel.name ?? '',
+            type: channel.type,
+            parentId: channel.parent_id ?? null,
+            position: channel.position ?? 0,
+            unreadCount: 0,
+        }));
     }
     async getWithBot(path, operation) {
         return this.get(path, `Bot ${this.botToken}`, operation);

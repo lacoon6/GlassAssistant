@@ -26,6 +26,14 @@ discordRouter.get('/channels', async (request, response, next) => {
         next(error);
     }
 });
+discordRouter.get('/default/channels', async (_request, response, next) => {
+    try {
+        response.json(await discord.getDefaultChannels(response.locals.discordAccessToken, env.discordTargetGuildId));
+    }
+    catch (error) {
+        next(error);
+    }
+});
 discordRouter.get('/messages', async (request, response, next) => {
     const channelId = typeof request.query.channelId === 'string' ? request.query.channelId : null;
     if (!channelId) {

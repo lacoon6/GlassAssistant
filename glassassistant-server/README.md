@@ -39,6 +39,7 @@ FRONTEND_URL=https://your-even-hub-frontend.example
 DISCORD_CLIENT_ID=your_client_id
 DISCORD_CLIENT_SECRET=your_client_secret
 DISCORD_BOT_TOKEN=your_discord_bot_token
+DISCORD_TARGET_GUILD_ID=
 DISCORD_REDIRECT_URI=https://api.nobutv.org/api/auth/callback
 SESSION_SECRET=a_cryptographically_random_secret_of_at_least_32_characters
 REDIS_URL=redis://127.0.0.1:6379
@@ -47,6 +48,8 @@ REDIS_URL=redis://127.0.0.1:6379
 Register `https://api.nobutv.org/api/auth/callback` exactly in the Discord Developer Portal. Restrict `.env` permissions and never expose its secrets to the frontend.
 
 `DISCORD_BOT_TOKEN` is required at startup. Server listing uses the signed-in user's OAuth token. Channel and message access uses bot authentication only after the signed-in user's guild membership has been verified.
+
+`DISCORD_TARGET_GUILD_ID` is optional. When omitted, the only guild shared by the signed-in user and bot is selected. Multiple shared guilds require an explicit ID.
 
 ### PM2
 

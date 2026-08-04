@@ -9,6 +9,7 @@ export type PageAction =
 
 export abstract class Page {
   protected selectedIndex = 0
+  protected viewportStart = 0
 
   public abstract readonly id: PageId
   protected abstract render(): string
@@ -52,6 +53,13 @@ export abstract class Page {
     return { type: 'none' }
   }
 
+  public getSelectedIndex(): number { return this.selectedIndex }
+  public getViewportStart(): number { return this.viewportStart }
+  public restoreSelection(index: number, itemCount: number): void {
+    this.selectedIndex = itemCount > 0 ? Math.max(0, Math.min(Math.trunc(index), itemCount - 1)) : 0
+    this.keepSelectionVisible(itemCount, 6)
+  }
+
   protected renderMenu(title: string, items: readonly string[]): string {
     const rows = items.map((item, index) => `${index === this.selectedIndex ? '▶' : ' '} ${item}`)
     return `${title}\n\n${rows.join('\n')}`
@@ -60,6 +68,15 @@ export abstract class Page {
   protected moveWithin(itemCount: number, direction: -1 | 1): PageAction {
     if (itemCount < 2) return { type: 'none' }
     this.selectedIndex = (this.selectedIndex + direction + itemCount) % itemCount
+    this.keepSelectionVisible(itemCount, 6)
     return { type: 'render' }
+  }
+
+  protected keepSelectionVisible(itemCount: number, visibleRows: number): void {
+    if (itemCount <= 0) { this.selectedIndex = 0; this.viewportStart = 0; return }
+    this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, itemCount - 1))
+    if (this.selectedIndex < this.viewportStart) this.viewportStart = this.selectedIndex
+    if (this.selectedIndex >= this.viewportStart + visibleRows) this.viewportStart = this.selectedIndex - visibleRows + 1
+    this.viewportStart = Math.max(0, Math.min(this.viewportStart, Math.max(0, itemCount - visibleRows)))
   }
 }

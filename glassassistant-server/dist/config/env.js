@@ -24,6 +24,7 @@ export const env = {
     discordClientId: required('DISCORD_CLIENT_ID'),
     discordClientSecret: required('DISCORD_CLIENT_SECRET'),
     discordBotToken: required('DISCORD_BOT_TOKEN'),
+    discordTargetGuildId: process.env.DISCORD_TARGET_GUILD_ID?.trim() || undefined,
     discordRedirectUri: required('DISCORD_REDIRECT_URI'),
     sessionSecret: required('SESSION_SECRET'),
     redisUrl: process.env.REDIS_URL?.trim() || undefined,
