@@ -43,6 +43,8 @@ DISCORD_TARGET_GUILD_ID=
 DISCORD_REDIRECT_URI=https://api.nobutv.org/api/auth/callback
 SESSION_SECRET=a_cryptographically_random_secret_of_at_least_32_characters
 REDIS_URL=redis://127.0.0.1:6379
+CORS_ALLOWED_ORIGINS=
+CORS_DIAGNOSTICS=false
 ```
 
 Register `https://api.nobutv.org/api/auth/callback` exactly in the Discord Developer Portal. Restrict `.env` permissions and never expose its secrets to the frontend.
@@ -50,6 +52,8 @@ Register `https://api.nobutv.org/api/auth/callback` exactly in the Discord Devel
 `DISCORD_BOT_TOKEN` is required at startup. Server listing uses the signed-in user's OAuth token. Channel and message access uses bot authentication only after the signed-in user's guild membership has been verified.
 
 `DISCORD_TARGET_GUILD_ID` is optional. When omitted, the only guild shared by the signed-in user and bot is selected. Multiple shared guilds require an explicit ID.
+
+CORS uses an exact-origin allowlist with credentials and `Vary: Origin`; it never returns a wildcard origin. Add only a confirmed WebView origin to `CORS_ALLOWED_ORIGINS`. Set `CORS_DIAGNOSTICS=true` temporarily to log origin, fetch-site, cookie/token presence booleans, route, and status without logging any credential values.
 
 ### PM2
 

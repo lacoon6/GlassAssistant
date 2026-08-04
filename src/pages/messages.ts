@@ -17,6 +17,7 @@ export class MessageListPage extends Page {
     const messages = this.getMessages.Execute(); const status = this.getMessages.GetStatus()
     if (status === 'loading') return 'Discord\n\nLoading messages...'
     if (status === 'login-required') return 'Discord login required\nOpen the phone app'
+    if (status === 'network-error') return 'Connection failed\nCheck the phone app'
     if (status === 'error') return `Discord\n\n${errors[this.getMessages.GetErrorCode() ?? 'UNKNOWN'] ?? 'Failed to load messages'}`
     if (messages.length === 0) return 'Discord\n\nNo messages\nCheck Bot history permission'
     this.keepSelectionVisible(messages.length, visibleRows)

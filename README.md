@@ -1,6 +1,6 @@
 # Glass Assistant
 
-Glass Assistant 0.10.2 opens directly to Discord channels on Even G2.
+Glass Assistant 0.10.3 opens directly to Discord channels on Even G2 and supports Discord OAuth inside the Even WebView.
 
 ## Run
 
@@ -21,6 +21,7 @@ The frontend sends credentials with backend requests and expects these routes:
 
 Discord OAuth, token storage, refresh, and Discord REST requests belong entirely to the backend. The frontend never receives Discord access or refresh tokens.
 The G2 flow is channels to messages; server names and settings are not rendered on glasses. Selection state is stored as validated JSON through the public Even Hub SDK local-storage bridge.
+Chrome and Even WebView cookies are intentionally treated as separate. Login navigates the current WebView to the backend OAuth route and returns to `/app/` on the backend origin.
 
 ```bash
 npm install

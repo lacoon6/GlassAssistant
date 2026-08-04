@@ -5,7 +5,7 @@ import type { DiscordRepository } from '../services/discord'
 export class GetMessagesUseCase {
   private channelId: string | null = null
   private messages: readonly DiscordMessage[] = []
-  private status: 'loading' | 'fresh' | 'error' | 'login-required' = 'loading'
+  private status: 'loading' | 'fresh' | 'error' | 'login-required' | 'network-error' = 'loading'
   private errorCode?: BackendErrorCode
   public constructor(private readonly repository: DiscordRepository) {}
   public SelectChannel(channelId: string): void { this.channelId = channelId; this.messages = []; this.status = 'loading'; this.errorCode = undefined }
@@ -15,6 +15,6 @@ export class GetMessagesUseCase {
     this.messages = result.messages; this.status = result.status; this.errorCode = result.errorCode
   }
   public Execute(): readonly DiscordMessage[] { return this.messages }
-  public GetStatus(): 'loading' | 'fresh' | 'error' | 'login-required' { return this.status }
+  public GetStatus(): 'loading' | 'fresh' | 'error' | 'login-required' | 'network-error' { return this.status }
   public GetErrorCode(): BackendErrorCode | undefined { return this.errorCode }
 }

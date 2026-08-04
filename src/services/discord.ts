@@ -3,14 +3,14 @@ import { DiscordMessage } from '../models/message'
 import type { DiscordServer } from '../models/server'
 import { BackendApiError, BackendClient, type BackendErrorCode } from './backend'
 
-export type LoadStatus = 'loading' | 'fresh' | 'offline' | 'error' | 'login-required'
+export type LoadStatus = 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' | 'network-error'
 export interface ChannelRepositoryResult {
   readonly status: LoadStatus
   readonly channels: readonly DiscordChannel[]
   readonly errorCode?: BackendErrorCode
 }
 export interface MessageRepositoryResult {
-  readonly status: Exclude<LoadStatus, 'offline'>
+  readonly status: Exclude<LoadStatus, 'offline' | 'network-error'> | 'network-error'
   readonly messages: readonly DiscordMessage[]
   readonly errorCode?: BackendErrorCode
 }
@@ -59,7 +59,7 @@ export class BackendDiscordRepository implements DiscordRepository {
       this.loggedIn = true
       return { status: 'fresh', channels }
     } catch (error) {
-      if (error instanceof BackendApiError) return { status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' : 'error', channels: [], errorCode: error.code }
+      if (error instanceof BackendApiError) return { status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' : error.code === 'NETWORK_OR_CORS_ERROR' ? 'network-error' : 'error', channels: [], errorCode: error.code }
       return { status: navigator.onLine ? 'error' : 'offline', channels: [] }
     }
   }
@@ -72,7 +72,7 @@ export class BackendDiscordRepository implements DiscordRepository {
       this.loggedIn = true
       return { status: 'fresh', messages }
     } catch (error) {
-      if (error instanceof BackendApiError) return { status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' : 'error', messages: [], errorCode: error.code }
+      if (error instanceof BackendApiError) return { status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' : error.code === 'NETWORK_OR_CORS_ERROR' ? 'network-error' : 'error', messages: [], errorCode: error.code }
       return { status: 'error', messages: [] }
     }
   }

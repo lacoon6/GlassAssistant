@@ -6,6 +6,8 @@ import {
   type CreateStartUpPageContainer, type EvenHubEvent, type RebuildPageContainer,
 } from '@evenrealities/even_hub_sdk'
 import { App, type AppBridge } from '../src/app.js'
+import { BackendApiError, BackendClient } from '../src/services/backend.js'
+import { showConnectionFailure, showDiscordLogin } from '../src/phone-ui.js'
 import { DiscordChannel } from '../src/models/channel.js'
 import { DiscordMessage } from '../src/models/message.js'
 import type { ChannelRepositoryResult, DiscordRepository, MessageRepositoryResult } from '../src/services/discord.js'
@@ -109,4 +111,50 @@ test('state saves, restores valid selection, rejects broken JSON, and handles fo
 test('source does not reference unavailable background APIs or private shims', () => {
   const source = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /setBackgroundState|onBackgroundRestore|__getStateSnapshot/)
+})
+
+test('backend distinguishes 401 from fetch network or CORS failure', async () => {
+  const unauthorized = new BackendClient('https://api.example', async () => new Response('{}', { status: 401 }), () => undefined)
+  await assert.rejects(unauthorized.DefaultChannels(), (error: unknown) =>
+    error instanceof BackendApiError && error.code === 'DISCORD_LOGIN_REQUIRED' && error.status === 401)
+  const network = new BackendClient('https://api.example', async () => { throw new TypeError('hidden browser detail') }, () => undefined)
+  await assert.rejects(network.DefaultChannels(), (error: unknown) =>
+    error instanceof BackendApiError && error.code === 'NETWORK_OR_CORS_ERROR' && error.status === undefined)
+})
+
+test('phone login UI renders a button that navigates in the current WebView', () => {
+  let click: (() => void) | undefined
+  let loginCalls = 0
+  const children: Array<{ textContent?: string }> = []
+  const documentRef = { createElement: (tag: string) => ({
+    textContent: '', type: '', tag,
+    addEventListener: (_name: string, listener: () => void) => { click = listener },
+  }) } as unknown as Document
+  const container = { replaceChildren: (...values: Array<{ textContent?: string }>) => { children.push(...values) } } as unknown as HTMLElement
+  showDiscordLogin(container, () => { loginCalls += 1 }, documentRef)
+  assert.deepEqual(children.map(child => child.textContent), ['Discord login required', 'Discord Login'])
+  click?.()
+  assert.equal(loginCalls, 1)
+
+  let destination = ''
+  new BackendClient('https://api.nobutv.org', fetch, url => { destination = url }).Login()
+  assert.equal(destination, 'https://api.nobutv.org/api/auth/login')
+
+  children.length = 0
+  showConnectionFailure(container, () => { loginCalls += 1 }, documentRef)
+  assert.deepEqual(children.map(child => child.textContent), ['Connection failed. Check network or WebView access.', 'Discord Login'])
+})
+
+test('login-required G2 state is distinct and startup container is still created once', async () => {
+  const repository = new FakeRepository(); repository.channels = { status: 'login-required', channels: [], errorCode: 'DISCORD_LOGIN_REQUIRED' }
+  const bridge = new FakeBridge(); const app = new App(bridge, repository); await app.start()
+  assert.equal(app.needsDiscordLogin(), true)
+  assert.match(bridge.rebuilds.at(-1) ?? '', /Discord login required\nOpen the phone app/)
+  assert.equal(bridge.startupCalls, 1)
+})
+
+test('network or CORS G2 state has a dedicated connection message', async () => {
+  const repository = new FakeRepository(); repository.channels = { status: 'network-error', channels: [], errorCode: 'NETWORK_OR_CORS_ERROR' }
+  const bridge = new FakeBridge(); await new App(bridge, repository).start()
+  assert.match(bridge.rebuilds.at(-1) ?? '', /Connection failed\nCheck the phone app/)
 })

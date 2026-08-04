@@ -4,6 +4,7 @@ import session from 'express-session'
 import { RedisStore } from 'connect-redis'
 import { createClient } from 'redis'
 import { env } from './config/env.js'
+import { createCorsOptions } from './config/corsPolicy.js'
 import { authRouter } from './routes/auth.js'
 import { discordRouter } from './routes/discord.js'
 import { DiscordApiError } from './services/discordApi.js'
@@ -17,7 +18,7 @@ if (redisClient) {
 if (env.trustProxy) app.set('trust proxy', 1)
 
 app.disable('x-powered-by')
-app.use(cors({ origin: env.frontendOrigin, credentials: true }))
+app.use(cors(createCorsOptions(env.corsAllowedOrigins)))
 app.use(express.json({ limit: '32kb' }))
 app.use(
   session({
@@ -35,6 +36,20 @@ app.use(
   }),
 )
 
+if (env.corsDiagnostics) {
+  app.use((request, response, next) => {
+    response.on('finish', () => console.info('Request diagnostic', {
+      origin: request.get('origin') ?? null,
+      secFetchSite: request.get('sec-fetch-site') ?? null,
+      hasSessionCookie: Boolean(request.headers.cookie),
+      hasDiscordOAuthToken: Boolean(request.session.discordTokens?.accessToken),
+      route: request.path,
+      responseStatus: response.statusCode,
+    }))
+    next()
+  })
+}
+
 app.get('/health', (_request, response) => {
   response.status(200).type('application/json').json({ status: 'ok' })
 })
@@ -42,6 +57,10 @@ app.use('/api/auth', authRouter)
 app.use('/api/discord', discordRouter)
 
 app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+  if (error instanceof Error && error.message === 'CORS origin denied') {
+    response.status(403).json({ error: 'CORS_ORIGIN_DENIED' })
+    return
+  }
   if (error instanceof DiscordApiError) {
     response.status(error.status).json({ error: error.code })
     return

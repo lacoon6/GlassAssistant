@@ -32,7 +32,7 @@ export class App {
   private saveQueue: Promise<unknown> = Promise.resolve()
   private lastUpdatedAt = 0
 
-  public constructor(private readonly bridge: AppBridge, discord: DiscordRepository = new BackendDiscordRepository()) {
+  public constructor(private readonly bridge: AppBridge, private readonly discord: DiscordRepository = new BackendDiscordRepository()) {
     const getMessages = new GetMessagesUseCase(discord)
     this.channelPage = new ChannelPage(new GetChannelsUseCase(discord), getMessages)
     this.messagePage = new MessageListPage(getMessages)
@@ -64,6 +64,8 @@ export class App {
   }
 
   public needsDiscordLogin(): boolean { return this.channelPage.getStatus() === 'login-required' }
+  public hasConnectionFailure(): boolean { return this.channelPage.getStatus() === 'network-error' }
+  public login(): Promise<void> { return this.discord.login() }
 
   private async handleEvent(event: EvenHubEvent): Promise<void> {
     const sysType = event.sysEvent ? (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null

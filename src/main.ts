@@ -1,21 +1,12 @@
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
 import { App } from './app'
 import { DummyDiscordRepository } from './services/discord'
+import { showConnectionFailure, showDiscordLogin } from './phone-ui'
 
 const statusElement = document.querySelector<HTMLElement>('#app')
 
 function showStatus(message: string): void {
   if (statusElement) statusElement.textContent = message
-}
-
-function showDiscordLogin(): void {
-  if (!statusElement) return
-  const baseUrl = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
-  statusElement.replaceChildren(document.createTextNode('Discord login required. '))
-  const link = document.createElement('a')
-  link.href = `${baseUrl}/api/auth/login`
-  link.textContent = 'Discord Login'
-  statusElement.append(link)
 }
 
 function safeErrorSummary(error: unknown): string {
@@ -27,6 +18,7 @@ function safeErrorSummary(error: unknown): string {
 }
 
 async function main(): Promise<void> {
+  console.info('WebView location', { origin: window.location.origin, pathname: window.location.pathname })
   let bridge
   try {
     bridge = await waitForEvenAppBridge()
@@ -40,7 +32,8 @@ async function main(): Promise<void> {
       ? new App(bridge, new DummyDiscordRepository())
       : new App(bridge)
     await app.start()
-    if (app.needsDiscordLogin()) { showDiscordLogin(); return }
+    if (app.needsDiscordLogin()) { if (statusElement) showDiscordLogin(statusElement, () => { void app.login() }); return }
+    if (app.hasConnectionFailure()) { if (statusElement) showConnectionFailure(statusElement, () => { void app.login() }); return }
   } catch (error) {
     throw new Error(`app.start failed: ${safeErrorSummary(error)}`)
   }

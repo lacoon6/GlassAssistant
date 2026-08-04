@@ -3,7 +3,7 @@ import type { DiscordRepository } from '../services/discord'
 
 export class GetChannelsUseCase {
   private channels: readonly DiscordChannel[] = []
-  private status: 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' = 'loading'
+  private status: 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' | 'network-error' = 'loading'
 
   public constructor(private readonly repository: DiscordRepository) {}
 
@@ -23,7 +23,7 @@ export class GetChannelsUseCase {
     return this.channels
   }
 
-  public GetStatus(): 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' {
+  public GetStatus(): 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' | 'network-error' {
     return this.status
   }
 }
