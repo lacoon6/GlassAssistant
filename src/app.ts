@@ -31,6 +31,7 @@ export class App {
   private saveTimer?: ReturnType<typeof setTimeout>
   private saveQueue: Promise<unknown> = Promise.resolve()
   private lastUpdatedAt = 0
+  private statusListener?: () => void
 
   public constructor(private readonly bridge: AppBridge, private readonly discord: DiscordRepository = new BackendDiscordRepository()) {
     const getMessages = new GetMessagesUseCase(discord)
@@ -66,6 +67,12 @@ export class App {
   public needsDiscordLogin(): boolean { return this.channelPage.getStatus() === 'login-required' }
   public hasConnectionFailure(): boolean { return this.channelPage.getStatus() === 'network-error' }
   public login(): Promise<void> { return this.discord.login() }
+  public loginUrl(): string | null { return this.discord.loginUrl() }
+  public onStatusChange(listener: () => void): void { this.statusListener = listener }
+  public async retryChannels(): Promise<void> {
+    this.channelPage.BeginLoad(); await this.renderCurrentPage(); await this.channelPage.Load(); this.lastUpdatedAt = Date.now()
+    this.currentPage = this.channelPage; await this.renderCurrentPage(); this.statusListener?.()
+  }
 
   private async handleEvent(event: EvenHubEvent): Promise<void> {
     const sysType = event.sysEvent ? (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null
@@ -83,7 +90,11 @@ export class App {
     let action: PageAction = { type: 'none' }
     if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) action = this.currentPage.moveSelection(-1)
     else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) action = this.currentPage.moveSelection(1)
-    else if (eventType === OsEventTypeList.CLICK_EVENT) action = this.currentPage.select()
+    else if (eventType === OsEventTypeList.CLICK_EVENT) {
+      if (this.needsDiscordLogin()) { await this.login(); return }
+      if (this.hasConnectionFailure()) { await this.retryChannels(); return }
+      action = this.currentPage.select()
+    }
     if (action.type === 'navigate') await this.navigate(action.page)
     else if (action.type === 'render') await this.renderCurrentPage()
     if (action.type !== 'none') this.schedulePersist()

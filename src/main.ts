@@ -31,9 +31,22 @@ async function main(): Promise<void> {
     const app = import.meta.env.VITE_FAKE_DISCORD === 'true'
       ? new App(bridge, new DummyDiscordRepository())
       : new App(bridge)
+    const renderPhoneStatus = (): void => {
+      if (!statusElement) return
+      const loginUrl = app.loginUrl()
+      if (app.needsDiscordLogin() && loginUrl) { showDiscordLogin(statusElement, loginUrl); return }
+      if (app.hasConnectionFailure() && loginUrl) {
+        showConnectionFailure(statusElement, loginUrl, () => { void app.retryChannels() }); return
+      }
+      showStatus('G2 display initialized successfully.')
+    }
+    app.onStatusChange(renderPhoneStatus)
     await app.start()
-    if (app.needsDiscordLogin()) { if (statusElement) showDiscordLogin(statusElement, () => { void app.login() }); return }
-    if (app.hasConnectionFailure()) { if (statusElement) showConnectionFailure(statusElement, () => { void app.login() }); return }
+    renderPhoneStatus()
+    const authResult = new URL(window.location.href).searchParams.get('auth')
+    if (authResult === 'error') showStatus('Discord login failed')
+    if (authResult === 'success' || authResult === 'error') window.history.replaceState(null, '', window.location.pathname)
+    if (app.needsDiscordLogin() || app.hasConnectionFailure()) return
   } catch (error) {
     throw new Error(`app.start failed: ${safeErrorSummary(error)}`)
   }

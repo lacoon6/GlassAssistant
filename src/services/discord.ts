@@ -23,6 +23,7 @@ export interface DiscordRepository {
   logout(): Promise<void>
   isLoggedIn(): boolean
   isBackendConfigured(): boolean
+  loginUrl(): string | null
 }
 
 export class DummyDiscordRepository implements DiscordRepository {
@@ -42,6 +43,7 @@ export class DummyDiscordRepository implements DiscordRepository {
   public logout(): Promise<void> { return Promise.resolve() }
   public isLoggedIn(): boolean { return true }
   public isBackendConfigured(): boolean { return true }
+  public loginUrl(): string | null { return 'https://api.nobutv.org/api/auth/login' }
 }
 
 export class BackendDiscordRepository implements DiscordRepository {
@@ -81,4 +83,5 @@ export class BackendDiscordRepository implements DiscordRepository {
   public async logout(): Promise<void> { await this.backend.Logout(); this.loggedIn = false }
   public isLoggedIn(): boolean { return this.loggedIn }
   public isBackendConfigured(): boolean { return this.backend.IsConfigured() }
+  public loginUrl(): string | null { return this.backend.LoginUrl() }
 }

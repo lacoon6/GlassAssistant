@@ -21,7 +21,7 @@ export class ChannelPage extends Page {
   protected render(): string {
     const channels = this.getChannels.Execute(); const status = this.getChannels.GetStatus()
     if (status === 'loading') return 'Discord\n\nLoading channels...'
-    if (status === 'login-required') return 'Discord login required\nOpen the phone app'
+    if (status === 'login-required') return 'Discord login required\nPress once or open phone'
     if (status === 'network-error') return 'Connection failed\nCheck the phone app'
     if (status === 'offline') return 'Discord\n\nOffline'
     if (status === 'error') return 'Discord\n\nFailed to load Discord'

@@ -48,8 +48,20 @@ export class BackendClient {
     return this.baseUrl.length > 0
   }
 
+  public LoginUrl(): string | null {
+    try {
+      const configured = new URL(this.baseUrl)
+      if (configured.protocol !== 'https:' || configured.username || configured.password ||
+        (configured.pathname !== '' && configured.pathname !== '/') || configured.search || configured.hash) return null
+      const login = new URL('/api/auth/login', configured.origin)
+      if (login.protocol !== 'https:' || login.origin !== configured.origin || login.pathname !== '/api/auth/login') return null
+      return login.href
+    } catch { return null }
+  }
+
   public Login(): void {
-    if (this.IsConfigured()) this.navigate(this.url('/api/auth/login'))
+    const loginUrl = this.LoginUrl()
+    if (loginUrl) this.navigate(loginUrl)
   }
 
   public async Logout(): Promise<void> {

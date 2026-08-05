@@ -11,3 +11,10 @@ export function parseFrontendUrl(value) {
     }
     return { frontendUrl: value, frontendOrigin: parsed.origin };
 }
+export function frontendAuthResultUrl(frontendUrl, result) {
+    const parsed = new URL(frontendUrl);
+    parsed.search = '';
+    parsed.hash = '';
+    parsed.searchParams.set('auth', result);
+    return parsed.toString();
+}

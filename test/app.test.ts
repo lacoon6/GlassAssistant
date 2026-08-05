@@ -22,13 +22,16 @@ class FakeRepository implements DiscordRepository {
   public messages: MessageRepositoryResult = { status: 'fresh', messages: [
     new DiscordMessage('m1', 'text-1', 'Author', 'Message body', '2026-08-05T01:02:00Z'),
   ] }
+  public loginCalls = 0
+  public channelCalls = 0
   public getServers() { return Promise.resolve({ status: 'fresh' as const, servers: [] }) }
-  public getChannels() { return Promise.resolve(this.channels) }
+  public getChannels() { this.channelCalls += 1; return Promise.resolve(this.channels) }
   public getMessages() { return Promise.resolve(this.messages) }
-  public login() { return Promise.resolve() }
+  public login() { this.loginCalls += 1; return Promise.resolve() }
   public logout() { return Promise.resolve() }
   public isLoggedIn() { return true }
   public isBackendConfigured() { return true }
+  public loginUrl() { return 'https://api.nobutv.org/api/auth/login' }
 }
 
 class FakeBridge implements AppBridge {
@@ -54,7 +57,7 @@ class FakeBridge implements AppBridge {
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 120))
 const textEvent = (eventType?: OsEventTypeList) => ({ textEvent: { eventType } }) as EvenHubEvent
-const sysEvent = (eventType: OsEventTypeList, eventSource?: EventSourceType) => ({ sysEvent: { eventType, eventSource } }) as EvenHubEvent
+const sysEvent = (eventType?: OsEventTypeList, eventSource?: EventSourceType) => ({ sysEvent: { eventType, eventSource } }) as EvenHubEvent
 
 test('startup opens filtered Discord channels and creates startup once', async () => {
   const bridge = new FakeBridge(); await new App(bridge, new FakeRepository()).start()
@@ -122,34 +125,55 @@ test('backend distinguishes 401 from fetch network or CORS failure', async () =>
     error instanceof BackendApiError && error.code === 'NETWORK_OR_CORS_ERROR' && error.status === undefined)
 })
 
-test('phone login UI renders a button that navigates in the current WebView', () => {
-  let click: (() => void) | undefined
-  let loginCalls = 0
-  const children: Array<{ textContent?: string }> = []
-  const documentRef = { createElement: (tag: string) => ({
-    textContent: '', type: '', tag,
-    addEventListener: (_name: string, listener: () => void) => { click = listener },
-  }) } as unknown as Document
-  const container = { replaceChildren: (...values: Array<{ textContent?: string }>) => { children.push(...values) } } as unknown as HTMLElement
-  showDiscordLogin(container, () => { loginCalls += 1 }, documentRef)
-  assert.deepEqual(children.map(child => child.textContent), ['Discord login required', 'Discord Login'])
-  click?.()
-  assert.equal(loginCalls, 1)
+test('phone login UI uses a safe real anchor with touchable unobstructed styles and guarded diagnostics', async () => {
+  type Listener = () => void
+  class FakeElement {
+    public textContent = ''; public href = ''; public target = ''; public rel = ''; public type = ''
+    public style: Record<string, string> = {}; public children: FakeElement[] = []
+    public listeners = new Map<string, Listener>()
+    public addEventListener(name: string, listener: Listener) { this.listeners.set(name, listener) }
+    public replaceChildren(...values: FakeElement[]) { this.children = values }
+  }
+  const documentRef = { createElement: () => new FakeElement() } as unknown as Document
+  const container = new FakeElement()
+  const logs: unknown[][] = []
+  showDiscordLogin(container as unknown as HTMLElement, 'https://api.nobutv.org/api/auth/login', {
+    documentRef, logger: { info: (...values: unknown[]) => { logs.push(values) } } as Console,
+  })
+  const link = container.children[1]
+  assert.deepEqual(container.children.map(child => child.textContent), ['Discord login required', 'Discord Login'])
+  assert.equal(link.href, 'https://api.nobutv.org/api/auth/login')
+  assert.equal(link.target, '_self'); assert.equal(link.rel, 'nofollow')
+  assert.equal(link.style.pointerEvents, 'auto'); assert.equal(link.style.minHeight, '48px')
+  assert.equal(container.style.pointerEvents, 'auto'); assert.equal(container.style.position, 'relative')
+  assert.ok(link.listeners.has('pointerdown')); assert.ok(link.listeners.has('touchend')); assert.ok(link.listeners.has('click'))
+  link.listeners.get('pointerdown')?.(); link.listeners.get('touchend')?.(); link.listeners.get('click')?.(); link.listeners.get('click')?.()
+  assert.equal(logs.filter(values => values[0] === 'login navigation requested').length, 1)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.deepEqual(container.children.map(child => child.textContent), ['Opening Discord...'])
 
+  let retryCalls = 0
+  showConnectionFailure(container as unknown as HTMLElement, 'https://api.nobutv.org/api/auth/login', () => { retryCalls += 1 }, { documentRef })
+  assert.deepEqual(container.children.map(child => child.textContent), ['Connection failed', 'Retry', 'Discord Login'])
+  container.children[1].listeners.get('click')?.(); assert.equal(retryCalls, 1)
+})
+
+test('BackendClient accepts only the configured absolute HTTPS login origin', () => {
   let destination = ''
-  new BackendClient('https://api.nobutv.org', fetch, url => { destination = url }).Login()
-  assert.equal(destination, 'https://api.nobutv.org/api/auth/login')
-
-  children.length = 0
-  showConnectionFailure(container, () => { loginCalls += 1 }, documentRef)
-  assert.deepEqual(children.map(child => child.textContent), ['Connection failed. Check network or WebView access.', 'Discord Login'])
+  const backend = new BackendClient('https://api.nobutv.org', fetch, url => { destination = url })
+  assert.equal(backend.LoginUrl(), 'https://api.nobutv.org/api/auth/login')
+  backend.Login(); assert.equal(destination, 'https://api.nobutv.org/api/auth/login')
+  for (const unsafe of ['javascript:alert(1)', 'http://api.nobutv.org', 'https://evil.example/path', 'https://api.nobutv.org/other']) {
+    destination = ''; const client = new BackendClient(unsafe, fetch, url => { destination = url })
+    assert.equal(client.LoginUrl(), null); client.Login(); assert.equal(destination, '')
+  }
 })
 
 test('login-required G2 state is distinct and startup container is still created once', async () => {
   const repository = new FakeRepository(); repository.channels = { status: 'login-required', channels: [], errorCode: 'DISCORD_LOGIN_REQUIRED' }
   const bridge = new FakeBridge(); const app = new App(bridge, repository); await app.start()
   assert.equal(app.needsDiscordLogin(), true)
-  assert.match(bridge.rebuilds.at(-1) ?? '', /Discord login required\nOpen the phone app/)
+  assert.match(bridge.rebuilds.at(-1) ?? '', /Discord login required\nPress once or open phone/)
   assert.equal(bridge.startupCalls, 1)
 })
 
@@ -157,4 +181,32 @@ test('network or CORS G2 state has a dedicated connection message', async () => 
   const repository = new FakeRepository(); repository.channels = { status: 'network-error', channels: [], errorCode: 'NETWORK_OR_CORS_ERROR' }
   const bridge = new FakeBridge(); await new App(bridge, repository).start()
   assert.match(bridge.rebuilds.at(-1) ?? '', /Connection failed\nCheck the phone app/)
+})
+
+test('G2 undefined CLICK_EVENT and R1 CLICK_EVENT start login once', async () => {
+  for (const event of [sysEvent(undefined), sysEvent(OsEventTypeList.CLICK_EVENT, EventSourceType.TOUCH_EVENT_FROM_GLASSES_R)]) {
+    const repository = new FakeRepository(); repository.channels = { status: 'login-required', channels: [], errorCode: 'DISCORD_LOGIN_REQUIRED' }
+    const bridge = new FakeBridge(); await new App(bridge, repository).start(); bridge.emit(event); await pause()
+    assert.equal(repository.loginCalls, 1)
+  }
+})
+
+test('network Retry reuses the App startup container and changes 401 to login-required', async () => {
+  const repository = new FakeRepository(); repository.channels = { status: 'network-error', channels: [], errorCode: 'NETWORK_OR_CORS_ERROR' }
+  const bridge = new FakeBridge(); const app = new App(bridge, repository); await app.start()
+  repository.channels = { status: 'login-required', channels: [], errorCode: 'DISCORD_LOGIN_REQUIRED' }
+  bridge.emit(sysEvent(undefined)); await pause()
+  assert.equal(bridge.startupCalls, 1); assert.equal(repository.channelCalls, 2); assert.equal(repository.loginCalls, 0)
+  assert.equal(app.needsDiscordLogin(), true)
+})
+
+test('diagnostic source never logs Cookie, session, OAuth state, token, Bot Token, or Client Secret', () => {
+  const source = readFileSync(new URL('../src/phone-ui.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /console\.(?:info|log)\([^\n]*(?:cookie|session|oauth state|token|client secret)/i)
+})
+
+test('OAuth return initializes the same App and fetches channels before consuming auth result', () => {
+  const source = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8')
+  assert.ok(source.indexOf('await app.start()') < source.indexOf("searchParams.get('auth')"))
+  assert.match(source, /history\.replaceState\(null, '', window\.location\.pathname\)/)
 })

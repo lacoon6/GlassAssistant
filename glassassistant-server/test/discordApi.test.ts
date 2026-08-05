@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import { DiscordApiError, DiscordApiService } from '../src/services/discordApi.js'
+import { frontendAuthResultUrl } from '../src/config/frontendUrl.js'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
+
+test('OAuth result returns to the same app WebView without secret query values', () => {
+  assert.equal(frontendAuthResultUrl('https://api.nobutv.org/app/', 'success'), 'https://api.nobutv.org/app/?auth=success')
+  assert.equal(frontendAuthResultUrl('https://api.nobutv.org/app/?old=value#fragment', 'error'), 'https://api.nobutv.org/app/?auth=error')
+})
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })

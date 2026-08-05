@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { env } from '../config/env.js';
 import { DiscordOAuthService } from '../services/discordOAuth.js';
+import { frontendAuthResultUrl } from '../config/frontendUrl.js';
 export const authRouter = Router();
 const oauth = new DiscordOAuthService();
 authRouter.get('/login', (request, response) => {
     response.redirect(oauth.createAuthorizationUrl(request));
 });
-authRouter.get('/callback', async (request, response, next) => {
+authRouter.get('/callback', async (request, response) => {
     const code = typeof request.query.code === 'string' ? request.query.code : null;
     const state = typeof request.query.state === 'string' ? request.query.state : null;
     if (!code || !state) {
@@ -15,10 +16,10 @@ authRouter.get('/callback', async (request, response, next) => {
     }
     try {
         await oauth.completeAuthorization(request, code, state);
-        response.redirect(env.frontendUrl);
+        response.redirect(frontendAuthResultUrl(env.frontendUrl, 'success'));
     }
-    catch (error) {
-        next(error);
+    catch {
+        response.redirect(frontendAuthResultUrl(env.frontendUrl, 'error'));
     }
 });
 authRouter.get('/logout', (request, response, next) => {
