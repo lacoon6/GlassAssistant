@@ -12,11 +12,16 @@ export class GetChannelsUseCase {
 
   public async Load(): Promise<void> {
     this.status = 'loading'
-    const result = await this.repository.getChannels()
-    this.channels = result.channels.filter(channel =>
-      (channel.kind === 'text' || channel.kind === 'announcement') && !channel.readOnly,
-    )
-    this.status = result.status
+    try {
+      const result = await this.repository.getChannels()
+      this.channels = result.channels.filter(channel =>
+        (channel.kind === 'text' || channel.kind === 'announcement') && !channel.readOnly,
+      )
+      this.status = result.status
+    } catch {
+      this.channels = []
+      this.status = 'network-error'
+    }
   }
 
   public Execute(): readonly DiscordChannel[] {

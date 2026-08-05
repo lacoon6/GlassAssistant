@@ -61,7 +61,11 @@ export class BackendDiscordRepository implements DiscordRepository {
       this.loggedIn = true
       return { status: 'fresh', channels }
     } catch (error) {
-      if (error instanceof BackendApiError) return { status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' : error.code === 'NETWORK_OR_CORS_ERROR' ? 'network-error' : 'error', channels: [], errorCode: error.code }
+      if (error instanceof BackendApiError) return {
+        status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' :
+          error.code === 'NETWORK_OR_CORS_ERROR' || (error.status !== undefined && error.status >= 500) ? 'network-error' : 'error',
+        channels: [], errorCode: error.code,
+      }
       return { status: navigator.onLine ? 'error' : 'offline', channels: [] }
     }
   }
@@ -74,7 +78,11 @@ export class BackendDiscordRepository implements DiscordRepository {
       this.loggedIn = true
       return { status: 'fresh', messages }
     } catch (error) {
-      if (error instanceof BackendApiError) return { status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' : error.code === 'NETWORK_OR_CORS_ERROR' ? 'network-error' : 'error', messages: [], errorCode: error.code }
+      if (error instanceof BackendApiError) return {
+        status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' :
+          error.code === 'NETWORK_OR_CORS_ERROR' || (error.status !== undefined && error.status >= 500) ? 'network-error' : 'error',
+        messages: [], errorCode: error.code,
+      }
       return { status: 'error', messages: [] }
     }
   }

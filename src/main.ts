@@ -2,6 +2,7 @@ import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
 import { App } from './app'
 import { DummyDiscordRepository } from './services/discord'
 import { showConnectionFailure, showDiscordLogin } from './phone-ui'
+import { bridgePresence, startupFailureText, type StartupPhase } from './startup-diagnostics'
 
 const statusElement = document.querySelector<HTMLElement>('#app')
 
@@ -9,28 +10,27 @@ function showStatus(message: string): void {
   if (statusElement) statusElement.textContent = message
 }
 
-function safeErrorSummary(error: unknown): string {
-  if (error instanceof Error) {
-    const startupResult = error.message.match(/^createStartUpPageContainer failed with result (\d+)$/)
-    return startupResult ? startupResult[0] : error.name
-  }
-  return 'Unknown error'
-}
+let startupPromise: Promise<void> | null = null
 
-async function main(): Promise<void> {
+async function initializeG2(): Promise<void> {
+  let phase: StartupPhase = 'bridge'
+  const reportPhase = (nextPhase: StartupPhase, detail?: string): void => {
+    phase = nextPhase
+    console.info('G2 startup phase', detail ? { phase: nextPhase, detail } : { phase: nextPhase })
+  }
   console.info('WebView location', { origin: window.location.origin, pathname: window.location.pathname })
-  let bridge
   try {
-    bridge = await waitForEvenAppBridge()
-    console.log('waitForEvenAppBridge complete')
-  } catch (error) {
-    throw new Error(`waitForEvenAppBridge failed: ${safeErrorSummary(error)}`)
-  }
+    reportPhase('bridge')
+    const before = bridgePresence(window)
+    console.info('Even bridge presence', before)
+    const startedAt = performance.now()
+    const bridge = await waitForEvenAppBridge()
+    const elapsedMs = Math.round(performance.now() - startedAt)
+    console.info('Even bridge ready', { resolved: true, elapsedMs })
 
-  try {
     const app = import.meta.env.VITE_FAKE_DISCORD === 'true'
-      ? new App(bridge, new DummyDiscordRepository())
-      : new App(bridge)
+      ? new App(bridge, new DummyDiscordRepository(), reportPhase)
+      : new App(bridge, undefined, reportPhase)
     const renderPhoneStatus = (): void => {
       if (!statusElement) return
       const loginUrl = app.loginUrl()
@@ -48,14 +48,16 @@ async function main(): Promise<void> {
     if (authResult === 'success' || authResult === 'error') window.history.replaceState(null, '', window.location.pathname)
     if (app.needsDiscordLogin() || app.hasConnectionFailure()) return
   } catch (error) {
-    throw new Error(`app.start failed: ${safeErrorSummary(error)}`)
+    const safeText = startupFailureText(phase, error)
+    console.error('Glass Assistant startup failed', { phase, error: safeText.split('\n').at(-1) })
+    showStatus(safeText)
   }
-
-  showStatus('G2 display initialized successfully.')
 }
 
-void main().catch(error => {
-  const summary = safeErrorSummary(error)
-  console.error('Glass Assistant startup failed:', summary)
-  showStatus(`G2 startup failed: ${summary}`)
-})
+export function initializeG2Once(): Promise<void> {
+  if (startupPromise) return startupPromise
+  startupPromise = initializeG2()
+  return startupPromise
+}
+
+void initializeG2Once()

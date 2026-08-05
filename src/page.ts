@@ -1,4 +1,4 @@
-import { RebuildPageContainer, TextContainerProperty } from '@evenrealities/even_hub_sdk'
+import { TextContainerProperty, TextContainerUpgrade } from '@evenrealities/even_hub_sdk'
 
 export type PageId = 'configuration-error' | 'home' | 'settings' | 'servers' | 'channels' | 'messages' | 'detail'
 
@@ -38,10 +38,13 @@ export abstract class Page {
     })
   }
 
-  public createRebuildContainer(): RebuildPageContainer {
-    return new RebuildPageContainer({
-      containerTotalNum: 1,
-      textObject: [this.createContainer()],
+  public createTextUpgrade(): TextContainerUpgrade {
+    return new TextContainerUpgrade({
+      containerID: 1,
+      containerName: 'main',
+      contentOffset: 0,
+      contentLength: 0,
+      content: this.render(),
     })
   }
 

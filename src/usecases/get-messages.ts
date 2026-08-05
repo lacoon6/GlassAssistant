@@ -11,8 +11,12 @@ export class GetMessagesUseCase {
   public SelectChannel(channelId: string): void { this.channelId = channelId; this.messages = []; this.status = 'loading'; this.errorCode = undefined }
   public async Load(): Promise<void> {
     if (!this.channelId) { this.status = 'error'; return }
-    const result = await this.repository.getMessages(this.channelId)
-    this.messages = result.messages; this.status = result.status; this.errorCode = result.errorCode
+    try {
+      const result = await this.repository.getMessages(this.channelId)
+      this.messages = result.messages; this.status = result.status; this.errorCode = result.errorCode
+    } catch {
+      this.messages = []; this.status = 'network-error'; this.errorCode = 'NETWORK_OR_CORS_ERROR'
+    }
   }
   public Execute(): readonly DiscordMessage[] { return this.messages }
   public GetStatus(): 'loading' | 'fresh' | 'error' | 'login-required' | 'network-error' { return this.status }

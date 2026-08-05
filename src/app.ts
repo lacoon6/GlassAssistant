@@ -1,6 +1,6 @@
 import {
   CreateStartUpPageContainer, EventSourceType, type EvenAppBridge, type EvenHubEvent,
-  OsEventTypeList, StartUpPageCreateResult,
+  OsEventTypeList, StartUpPageCreateResult, TextContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 import { type Page, type PageAction, type PageId } from './page'
 import { ChannelPage } from './pages/channel'
@@ -8,10 +8,11 @@ import { MessageListPage } from './pages/messages'
 import { BackendDiscordRepository, type DiscordRepository } from './services/discord'
 import { GetChannelsUseCase } from './usecases/get-channels'
 import { GetMessagesUseCase } from './usecases/get-messages'
+import { StartupContainerResultError, startupResultName, type StartupPhase } from './startup-diagnostics'
 
 const stateKey = 'glass-assistant.state.v1'
 const staleAfterMs = 5 * 60 * 1000
-export type AppBridge = Pick<EvenAppBridge, 'createStartUpPageContainer' | 'rebuildPageContainer' |
+export type AppBridge = Pick<EvenAppBridge, 'createStartUpPageContainer' | 'textContainerUpgrade' |
   'shutDownPageContainer' | 'onEvenHubEvent' | 'setLocalStorage' | 'getLocalStorage'>
 interface AppSnapshot {
   currentPageId: 'channels' | 'messages'
@@ -22,6 +23,16 @@ interface AppSnapshot {
   updatedAt: number
 }
 
+export function createMinimalStartupContainer(): CreateStartUpPageContainer {
+  return new CreateStartUpPageContainer({
+    containerTotalNum: 1,
+    textObject: [new TextContainerProperty({
+      xPosition: 0, yPosition: 0, width: 576, height: 288, borderWidth: 0, paddingLength: 4,
+      containerID: 1, containerName: 'main', content: 'Glass Assistant\n\nStarting...', isEventCapture: 1,
+    })],
+  })
+}
+
 export class App {
   private readonly channelPage: ChannelPage
   private readonly messagePage: MessageListPage
@@ -29,26 +40,44 @@ export class App {
   private readonly pageHistory: Page[] = []
   private unsubscribe?: () => void
   private saveTimer?: ReturnType<typeof setTimeout>
-  private saveQueue: Promise<unknown> = Promise.resolve()
+  private bridgeQueue: Promise<void> = Promise.resolve()
+  private startPromise?: Promise<void>
   private lastUpdatedAt = 0
   private statusListener?: () => void
 
-  public constructor(private readonly bridge: AppBridge, private readonly discord: DiscordRepository = new BackendDiscordRepository()) {
+  public constructor(
+    private readonly bridge: AppBridge,
+    private readonly discord: DiscordRepository = new BackendDiscordRepository(),
+    private readonly reportPhase: (phase: StartupPhase, detail?: string) => void = () => undefined,
+  ) {
     const getMessages = new GetMessagesUseCase(discord)
     this.channelPage = new ChannelPage(new GetChannelsUseCase(discord), getMessages)
     this.messagePage = new MessageListPage(getMessages)
     this.currentPage = this.channelPage
   }
 
-  public async start(): Promise<void> {
-    const result = await this.bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
-      containerTotalNum: 1, textObject: [this.channelPage.createContainer()],
-    }))
-    if (result !== StartUpPageCreateResult.success) throw new Error(`createStartUpPageContainer failed with result ${result}`)
+  public start(): Promise<void> {
+    this.startPromise ??= this.startCore()
+    return this.startPromise
+  }
 
+  private async startCore(): Promise<void> {
+    this.reportPhase('startup-container')
+    const startupContainer = createMinimalStartupContainer()
+    const result = await this.enqueueBridge(() => this.bridge.createStartUpPageContainer(startupContainer))
+    this.reportPhase('startup-container', `${result} (${startupResultName(result)})`)
+    if (result !== StartUpPageCreateResult.success) throw new StartupContainerResultError(result)
+
+    this.reportPhase('event-subscription')
+    this.unsubscribe = this.bridge.onEvenHubEvent(event => {
+      void this.handleEvent(event).catch(error => console.error('G2 event handling failed', { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }))
+    })
+
+    this.reportPhase('storage-restore')
     const snapshot = await this.readSnapshot()
     this.channelPage.setRestoreChannelId(snapshot?.selectedChannelId)
     if (snapshot) this.channelPage.restoreSelection(snapshot.selectedChannelIndex, Number.MAX_SAFE_INTEGER)
+    this.reportPhase('discord-load')
     await this.channelPage.Load()
     this.currentPage = this.channelPage
 
@@ -61,7 +90,6 @@ export class App {
     }
     this.lastUpdatedAt = Date.now()
     await this.renderCurrentPage()
-    this.unsubscribe = this.bridge.onEvenHubEvent(event => { void this.handleEvent(event).catch(() => undefined) })
   }
 
   public needsDiscordLogin(): boolean { return this.channelPage.getStatus() === 'login-required' }
@@ -75,7 +103,7 @@ export class App {
   }
 
   private async handleEvent(event: EvenHubEvent): Promise<void> {
-    const sysType = event.sysEvent ? (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null
+    const sysType = event.sysEvent?.eventType ?? OsEventTypeList.CLICK_EVENT
     const textType = event.textEvent ? (event.textEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null
     if (sysType === OsEventTypeList.FOREGROUND_EXIT_EVENT) { await this.persistNow(); return }
     if (sysType === OsEventTypeList.FOREGROUND_ENTER_EVENT) { await this.restoreOnForeground(); return }
@@ -114,7 +142,7 @@ export class App {
 
   private async goBack(): Promise<void> {
     const previous = this.pageHistory.pop()
-    if (!previous) { await this.bridge.shutDownPageContainer(1); return }
+    if (!previous) { await this.enqueueBridge(() => this.bridge.shutDownPageContainer(1)); return }
     this.currentPage = previous; await this.renderCurrentPage(); this.schedulePersist()
   }
 
@@ -132,7 +160,12 @@ export class App {
     await this.renderCurrentPage()
   }
 
-  private renderCurrentPage(): Promise<boolean> { return this.bridge.rebuildPageContainer(this.currentPage.createRebuildContainer()) }
+  private async renderCurrentPage(): Promise<boolean> {
+    this.reportPhase('text-update')
+    const updated = await this.enqueueBridge(() => this.bridge.textContainerUpgrade(this.currentPage.createTextUpgrade()))
+    if (!updated) throw new Error('textContainerUpgrade failed')
+    return true
+  }
   private schedulePersist(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.persistNow() }, 80)
@@ -144,16 +177,21 @@ export class App {
       selectedChannelIndex: this.channelPage.getSelectedIndex(), selectedMessageIndex: this.messagePage.getSelectedIndex(),
       selectedChannelId: this.channelPage.getSelectedChannelId(), viewportStart: this.currentPage.getViewportStart(), updatedAt: Date.now(),
     }
-    this.saveQueue = this.saveQueue.then(() => this.bridge.setLocalStorage(stateKey, JSON.stringify(snapshot)))
-    return this.saveQueue
+    return this.enqueueBridge(() => this.bridge.setLocalStorage(stateKey, JSON.stringify(snapshot)))
   }
   private async readSnapshot(): Promise<AppSnapshot | null> {
+    const stored = await this.enqueueBridge(() => this.bridge.getLocalStorage(stateKey))
     try {
-      const parsed = JSON.parse(await this.bridge.getLocalStorage(stateKey)) as Partial<AppSnapshot>
+      const parsed = JSON.parse(stored) as Partial<AppSnapshot>
       if ((parsed.currentPageId !== 'channels' && parsed.currentPageId !== 'messages') ||
         !Number.isInteger(parsed.selectedChannelIndex) || !Number.isInteger(parsed.selectedMessageIndex) ||
         !Number.isFinite(parsed.updatedAt) || (parsed.selectedChannelId !== undefined && typeof parsed.selectedChannelId !== 'string')) return null
       return parsed as AppSnapshot
     } catch { return null }
+  }
+  private enqueueBridge<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.bridgeQueue.then(operation)
+    this.bridgeQueue = result.then(() => undefined, () => undefined)
+    return result
   }
 }
