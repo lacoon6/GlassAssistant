@@ -1,6 +1,6 @@
 # Glass Assistant
 
-Glass Assistant 0.10.5 opens directly to Discord channels on Even G2 and supports Discord OAuth inside the Even WebView.
+Glass Assistant 0.10.6 opens directly to Discord channels on Even G2 and supports Discord OAuth inside the Even WebView.
 
 ## Run
 

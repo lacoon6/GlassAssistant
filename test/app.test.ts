@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
-  EventSourceType, OsEventTypeList, StartUpPageCreateResult,
-  type CreateStartUpPageContainer, type EvenHubEvent, type TextContainerUpgrade,
+  CreateStartUpPageContainer, EventSourceType, OsEventTypeList, StartUpPageCreateResult,
+  type EvenHubEvent, type TextContainerProperty, type TextContainerUpgrade,
 } from '@evenrealities/even_hub_sdk'
 import { App, createMinimalStartupContainer, type AppBridge } from '../src/app.js'
 import { BackendApiError, BackendClient } from '../src/services/backend.js'
@@ -82,21 +82,26 @@ test('startup opens filtered Discord channels and creates startup once', async (
   assert.doesNotMatch(bridge.rebuilds.join('\n'), /Settings|Servers|private-name|voice|Sensei/)
 })
 
-test('minimal startup container exactly matches the SDK 0.0.10 diagnostic shape', () => {
+test('minimal startup container serializes as the device-safe SDK 0.0.10 plain object', () => {
   const startup = createMinimalStartupContainer()
+  const serialized = CreateStartUpPageContainer.toJson(startup)
   assert.equal(startup.containerTotalNum, 1)
   assert.equal(startup.listObject, undefined); assert.equal(startup.imageObject, undefined)
   assert.equal(startup.textObject?.length, 1)
   const text = startup.textObject?.[0]
   assert.deepEqual({
     xPosition: text?.xPosition, yPosition: text?.yPosition, width: text?.width, height: text?.height,
-    borderWidth: text?.borderWidth, paddingLength: text?.paddingLength, containerID: text?.containerID,
+    borderWidth: text?.borderWidth, borderColor: text?.borderColor, borderRadius: text?.borderRadius,
+    paddingLength: text?.paddingLength, containerID: text?.containerID,
     containerName: text?.containerName, content: text?.content, isEventCapture: text?.isEventCapture,
   }, {
-    xPosition: 0, yPosition: 0, width: 576, height: 288, borderWidth: 0, paddingLength: 4,
-    containerID: 1, containerName: 'main', content: 'Glass Assistant\n\nStarting...', isEventCapture: 1,
+    xPosition: 8, yPosition: 8, width: 560, height: 272, borderWidth: 0, borderColor: 0, borderRadius: 0,
+    paddingLength: 0, containerID: 1, containerName: 'main', content: 'Starting...', isEventCapture: 1,
   })
-  assert.ok((text?.containerName?.length ?? 99) <= 16)
+  assert.equal(serialized.containerTotalNum, 1)
+  assert.equal((serialized.textObject as unknown[])?.length, 1)
+  for (const field of ['xPosition', 'yPosition', 'width', 'height', 'borderWidth', 'borderColor', 'borderRadius',
+    'paddingLength', 'containerID', 'containerName', 'content', 'isEventCapture']) assert.notEqual(text?.[field as keyof TextContainerProperty], undefined)
   assert.equal('zOrderIndex' in (text ?? {}), false)
 })
 
