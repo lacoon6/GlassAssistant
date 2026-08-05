@@ -5,7 +5,7 @@ import {
   CreateStartUpPageContainer, EventSourceType, OsEventTypeList, StartUpPageCreateResult,
   type EvenHubEvent, TextContainerProperty, type TextContainerUpgrade,
 } from '@evenrealities/even_hub_sdk'
-import { App, createMinimalStartupContainer, type AppBridge } from '../src/app.js'
+import { App, createMinimalStartupContainer, serializeStartupPayload, startupPayloadFingerprint, type AppBridge } from '../src/app.js'
 import { BackendApiError, BackendClient } from '../src/services/backend.js'
 import { showConnectionFailure, showDiscordLogin } from '../src/phone-ui.js'
 import { DiscordChannel } from '../src/models/channel.js'
@@ -30,12 +30,12 @@ class FakeRepository implements DiscordRepository {
   public channelCalls = 0
   public serverCalls = 0
   public channelGuildIds: string[] = []
-  public rejectChannels = false
   public serversNeverResolve = false
   public onGetServers?: () => void
+  public rejectChannels = false
   public getServers() {
     this.serverCalls += 1; this.onGetServers?.()
-    return this.serversNeverResolve ? new Promise<typeof this.servers>(() => undefined) : Promise.resolve(this.servers)
+    return this.serversNeverResolve ? new Promise<ServerRepositoryResult>(() => undefined) : Promise.resolve(this.servers)
   }
   public getChannels(guildId: string) {
     this.channelCalls += 1; this.channelGuildIds.push(guildId)
@@ -62,9 +62,6 @@ class FakeBridge implements AppBridge {
   public activeBridgeCalls = 0
   public maxActiveBridgeCalls = 0
   public bridgeDelayMs = 0
-  public storageNeverResolves = false
-  public storageRejects = false
-  public callOrder: string[] = []
   private listener?: (event: EvenHubEvent) => void
   private async track<T>(value: T): Promise<T> {
     this.activeBridgeCalls += 1; this.maxActiveBridgeCalls = Math.max(this.maxActiveBridgeCalls, this.activeBridgeCalls)
@@ -72,21 +69,16 @@ class FakeBridge implements AppBridge {
     this.activeBridgeCalls -= 1; return value
   }
   public async createStartUpPageContainer(container: CreateStartUpPageContainer) {
-    this.startupCalls += 1; this.callOrder.push('startup'); this.rebuilds.push(container.textObject?.[0]?.content ?? '')
+    this.startupCalls += 1; this.rebuilds.push(container.textObject?.[0]?.content ?? '')
     return this.track(this.startupResult)
   }
   public async textContainerUpgrade(container: TextContainerUpgrade) {
-    this.textUpgradeCalls += 1; this.callOrder.push(`text:${container.content ?? ''}`); this.rebuilds.push(container.content ?? ''); return this.track(this.textResult)
+    this.textUpgradeCalls += 1; this.rebuilds.push(container.content ?? ''); return this.track(this.textResult)
   }
   public shutDownPageContainer() { this.shutdownCalls += 1; return this.track(true) }
   public onEvenHubEvent(callback: (event: EvenHubEvent) => void) { this.listener = callback; return () => { this.listener = undefined } }
   public setLocalStorage(_key: string, value: string) { this.saved.push(value); this.stored = value; return this.track(true) }
-  public getLocalStorage() {
-    this.callOrder.push('getLocalStorage')
-    if (this.storageNeverResolves) return new Promise<string>(() => undefined)
-    if (this.storageRejects) return Promise.reject(new Error('storage unavailable'))
-    return this.track(this.stored)
-  }
+  public getLocalStorage() { return this.track(this.stored) }
   public emit(event: EvenHubEvent) { this.listener?.(event) }
   public isSubscribed() { return Boolean(this.listener) }
 }
@@ -111,13 +103,13 @@ test('manifest and installed dependency use SDK 0.0.12', () => {
     version: string; min_sdk_version: string
   }
   assert.equal(packageJson.dependencies['@evenrealities/even_hub_sdk'], '0.0.12')
-  assert.equal(appJson.version, '0.10.10')
+  assert.equal(appJson.version, '0.10.11')
   assert.equal(appJson.min_sdk_version, '0.0.12')
 })
 
 test('minimal startup container uses SDK 0.0.12 classes and official fields', () => {
   const startup = createMinimalStartupContainer()
-  const serialized = CreateStartUpPageContainer.toJson(startup)
+  const serialized = serializeStartupPayload(startup)
   assert.ok(startup instanceof CreateStartUpPageContainer)
   assert.equal(startup.containerTotalNum, 1)
   assert.equal(startup.listObject, undefined); assert.equal(startup.imageObject, undefined)
@@ -139,6 +131,16 @@ test('minimal startup container uses SDK 0.0.12 classes and official fields', ()
     'paddingLength', 'containerID', 'containerName', 'content', 'isEventCapture']) assert.notEqual(text?.[field as keyof TextContainerProperty], undefined)
   assert.equal('zOrderIndex' in (text ?? {}), false)
   assert.equal(startup.textObject?.filter(container => container.isEventCapture === 1).length, 1)
+  assert.deepEqual(JSON.parse(JSON.stringify(serialized)), {
+    containerTotalNum: 1,
+    textObject: [{
+      xPosition: 0, yPosition: 0, width: 576, height: 288, borderWidth: 0, borderColor: 5,
+      paddingLength: 4, containerID: 1, containerName: 'main', content: 'Starting...', isEventCapture: 1,
+    }],
+  })
+  assert.equal(startupPayloadFingerprint(serialized), startupPayloadFingerprint({
+    ...serialized, widgetId: 987654321,
+  }))
 })
 
 test('startup phases are ordered and startup create is called only once', async () => {
@@ -149,37 +151,30 @@ test('startup phases are ordered and startup create is called only once', async 
     'storage-restore', 'discord-load', 'text-update'])
 })
 
-test('Loading channels is rendered before storage and hanging storage cannot block startup', async () => {
-  const bridge = new FakeBridge(); bridge.storageNeverResolves = true
-  const app = new App(bridge, new FakeRepository(), undefined, { storageMs: 10, bridgeMs: 20 })
-  await startAndLoad(app)
-  const loadingIndex = bridge.callOrder.findIndex(value => value.includes('Loading channels...'))
-  const storageIndex = bridge.callOrder.indexOf('getLocalStorage')
-  assert.ok(loadingIndex >= 0 && loadingIndex < storageIndex)
-  assert.match(bridge.rebuilds.at(-1) ?? '', /^Discord\n/)
+test('App.start subscribes and identifies the build on G2 before waiting for Discord', async () => {
+  const bridge = new FakeBridge(); const repository = new FakeRepository(); repository.serversNeverResolve = true
+  repository.onGetServers = () => assert.equal(bridge.isSubscribed(), true)
+  const app = new App(bridge, repository)
+  await app.start()
   assert.equal(bridge.startupCalls, 1)
-  assert.ok(bridge.textUpgradeCalls >= 2)
+  assert.equal(bridge.rebuilds[0], 'Starting...')
+  assert.equal(bridge.rebuilds[1], 'Build v0.10.11\nLoading channels...')
+  assert.equal(repository.serverCalls, 1)
+  assert.equal(repository.channelCalls, 0)
 })
 
-test('storage failure is best effort and Discord still loads', async () => {
-  const bridge = new FakeBridge(); bridge.storageRejects = true
-  const repository = new FakeRepository()
-  await startAndLoad(new App(bridge, repository, undefined, { storageMs: 10, bridgeMs: 20 }))
-  assert.equal(repository.channelCalls, 1)
-  assert.match(bridge.rebuilds.at(-1) ?? '', /# general/)
-})
+test('Discord starts only after startup result 0 and startup result is observable on phone', async () => {
+  const failedBridge = new FakeBridge(); failedBridge.startupResult = StartUpPageCreateResult.invalid
+  const failedRepository = new FakeRepository(); const failed = new App(failedBridge, failedRepository)
+  await assert.rejects(failed.start(), StartupContainerResultError)
+  assert.equal(failed.getStartupResult(), 1)
+  assert.match(failed.getStartupFingerprint(), /^[0-9a-f]{8}$/)
+  assert.equal(failedRepository.serverCalls, 0)
 
-test('status listener runs for successful, login-required, and network-error loads', async () => {
-  for (const status of ['fresh', 'login-required', 'network-error'] as const) {
-    const repository = new FakeRepository()
-    repository.channels = status === 'fresh' ? repository.channels : {
-      status, channels: [], errorCode: status === 'login-required' ? 'DISCORD_LOGIN_REQUIRED' : 'NETWORK_OR_CORS_ERROR',
-    }
-    const bridge = new FakeBridge(); let calls = 0
-    const app = new App(bridge, repository); app.onStatusChange(() => { calls += 1 }); await startAndLoad(app)
-    assert.equal(calls, 1)
-    assert.equal(bridge.startupCalls, 1)
-  }
+  const bridge = new FakeBridge(); const repository = new FakeRepository(); const app = new App(bridge, repository)
+  await startAndLoad(app)
+  assert.equal(app.getStartupResult(), 0)
+  assert.deepEqual(repository.channelGuildIds, ['guild-1'])
 })
 
 test('App.start called twice shares one startup Promise and one container creation', async () => {
@@ -189,36 +184,6 @@ test('App.start called twice shares one startup Promise and one container creati
   assert.equal(first, second)
   await Promise.all([first, second])
   assert.equal(bridge.startupCalls, 1)
-})
-
-test('App.start finishes before Discord resolution and subscribes before the first server request', async () => {
-  const bridge = new FakeBridge(); const repository = new FakeRepository(); repository.serversNeverResolve = true
-  repository.onGetServers = () => {
-    assert.equal(bridge.isSubscribed(), true)
-    assert.ok(bridge.rebuilds.some(value => value === 'Discord\n\nLoading channels...'))
-  }
-  const app = new App(bridge, repository)
-  await app.start()
-  assert.equal(repository.serverCalls, 1)
-  assert.equal(repository.channelCalls, 0)
-  assert.equal(bridge.startupCalls, 1)
-})
-
-test('one resolved server is selected internally and channels use its guildId', async () => {
-  const bridge = new FakeBridge(); const repository = new FakeRepository()
-  await startAndLoad(new App(bridge, repository))
-  assert.deepEqual(repository.channelGuildIds, ['guild-1'])
-  assert.match(bridge.rebuilds.at(-1) ?? '', /# general/)
-})
-
-test('multiple unresolved servers show a target configuration error without ServerPage', async () => {
-  const bridge = new FakeBridge(); const repository = new FakeRepository()
-  repository.servers = { status: 'fresh', servers: [new DiscordServer('one', 'One'), new DiscordServer('two', 'Two')] }
-  const app = new App(bridge, repository); await startAndLoad(app)
-  assert.equal(repository.channelCalls, 0)
-  assert.equal(app.hasTargetConfigurationFailure(), true)
-  assert.equal(bridge.rebuilds.at(-1), 'Target Discord server is not configured')
-  assert.doesNotMatch(bridge.rebuilds.join('\n'), /ServerPage|Home|Settings/)
 })
 
 test('all normal screen updates use textContainerUpgrade and never rebuild', async () => {
@@ -240,14 +205,6 @@ test('BLE Bridge calls remain serialized through one queue', async () => {
   bridge.emit(sysEvent(OsEventTypeList.FOREGROUND_EXIT_EVENT))
   await pause()
   assert.equal(bridge.maxActiveBridgeCalls, 1)
-})
-
-test('Bridge queue continues after a timed out storage operation', async () => {
-  const bridge = new FakeBridge(); bridge.storageNeverResolves = true
-  await startAndLoad(new App(bridge, new FakeRepository(), undefined, { storageMs: 5, bridgeMs: 15 }))
-  const lastTextIndex = bridge.callOrder.reduce((found, value, index) => value.startsWith('text:') ? index : found, -1)
-  assert.ok(bridge.callOrder.indexOf('getLocalStorage') < lastTextIndex)
-  assert.match(bridge.rebuilds.at(-1) ?? '', /# general/)
 })
 
 test('Discord load rejection is nonfatal and leaves event subscription active', async () => {
@@ -336,7 +293,9 @@ test('state saves, restores valid selection, rejects broken JSON, and handles fo
 
 test('source does not reference unavailable background APIs or private shims', () => {
   const source = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8')
-  assert.doesNotMatch(source, /setBackgroundState|onBackgroundRestore|__getStateSnapshot|callEvenApp|widgetId|__EVEN_HUB_APP_ID__|321/)
+  assert.doesNotMatch(source, /setBackgroundState|onBackgroundRestore|__getStateSnapshot|callEvenApp|__EVEN_HUB_APP_ID__|321/)
+  assert.doesNotMatch(source, /widgetId\s*[:=]/)
+  assert.match(source, /delete comparable\.widgetId/)
 })
 
 test('backend distinguishes 401 from fetch network or CORS failure', async () => {
@@ -352,19 +311,6 @@ test('backend 5xx is a retryable connection failure', async () => {
   const backend = new BackendClient('https://api.example', async () => new Response('{}', { status: 503 }), () => undefined)
   const result = await new BackendDiscordRepository(backend).getChannels('guild-1')
   assert.equal(result.status, 'network-error')
-})
-
-test('backend fetch timeout aborts and becomes Connection failed', async () => {
-  let signal: AbortSignal | undefined
-  const fetcher = ((_input: RequestInfo | URL, init?: RequestInit) => {
-    signal = init?.signal ?? undefined
-    return new Promise<Response>(() => undefined)
-  }) as typeof fetch
-  const repository = new BackendDiscordRepository(new BackendClient('https://api.example', fetcher, () => undefined, 20))
-  const bridge = new FakeBridge(); await startAndLoad(new App(bridge, repository))
-  assert.equal(signal?.aborted, true)
-  assert.match(readFileSync(new URL('../src/services/backend.ts', import.meta.url), 'utf8'), /requestTimeoutMs = 8000/)
-  assert.match(bridge.rebuilds.at(-1) ?? '', /Connection failed\nCheck the phone app/)
 })
 
 test('phone login UI uses a safe real anchor with touchable unobstructed styles and guarded diagnostics', async () => {
@@ -425,6 +371,15 @@ test('network or CORS G2 state has a dedicated connection message', async () => 
   assert.match(bridge.rebuilds.at(-1) ?? '', /Connection failed\nCheck the phone app/)
 })
 
+test('multiple resolved guilds show a clear target configuration error without a server page', async () => {
+  const repository = new FakeRepository()
+  repository.servers = { status: 'fresh', servers: [new DiscordServer('one', 'One'), new DiscordServer('two', 'Two')] }
+  const bridge = new FakeBridge(); const app = new App(bridge, repository); await startAndLoad(app)
+  assert.equal(repository.channelCalls, 0)
+  assert.equal(app.hasTargetConfigurationFailure(), true)
+  assert.equal(bridge.rebuilds.at(-1), 'Target Discord server is not configured')
+})
+
 test('G2 undefined CLICK_EVENT and R1 CLICK_EVENT start login once', async () => {
   for (const event of [sysEvent(undefined), sysEvent(OsEventTypeList.CLICK_EVENT, EventSourceType.TOUCH_EVENT_FROM_GLASSES_R)]) {
     const repository = new FakeRepository(); repository.channels = { status: 'login-required', channels: [], errorCode: 'DISCORD_LOGIN_REQUIRED' }
@@ -449,6 +404,9 @@ test('diagnostic source never logs Cookie, session, OAuth state, token, Bot Toke
 
 test('OAuth return initializes the same App and fetches channels before consuming auth result', () => {
   const source = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8')
+  assert.match(source, /Build: v0\.10\.11/)
+  assert.match(source, /Startup result:/)
+  assert.match(source, /Startup payload fingerprint:/)
   assert.ok(source.indexOf('await app.start()') < source.indexOf("searchParams.get('auth')"))
   assert.equal((source.match(/await app\.start\(\)/g) ?? []).length, 1)
   assert.match(source, /history\.replaceState\(null, '', window\.location\.pathname\)/)

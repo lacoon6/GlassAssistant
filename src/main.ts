@@ -1,19 +1,33 @@
-import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
+import { StartUpPageCreateResult, waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
 import { App } from './app'
 import { DummyDiscordRepository } from './services/discord'
 import { showConnectionFailure, showDiscordLogin } from './phone-ui'
 import { bridgePresence, startupFailureText, type StartupPhase } from './startup-diagnostics'
 
 const statusElement = document.querySelector<HTMLElement>('#app')
+let displayedStartupResult: number | 'pending' = 'pending'
+let displayedFingerprint = ''
+
+function createPhoneBody(): HTMLElement | null {
+  if (!statusElement) return null
+  const header = document.createElement('div')
+  header.textContent = `Build: v0.10.11\nStartup result: ${displayedStartupResult}`
+  const body = document.createElement('div')
+  statusElement.replaceChildren(header, body)
+  return body
+}
 
 function showStatus(message: string): void {
-  if (statusElement) statusElement.textContent = message
+  const body = createPhoneBody()
+  if (body) body.textContent = message
 }
 
 let startupPromise: Promise<void> | null = null
 
 async function initializeG2(): Promise<void> {
+  showStatus('')
   let phase: StartupPhase = 'bridge'
+  let renderPhoneStatus: (() => void) | undefined
   const reportPhase = (nextPhase: StartupPhase, detail?: string): void => {
     phase = nextPhase
     console.info('G2 startup phase', detail ? { phase: nextPhase, detail } : { phase: nextPhase })
@@ -31,15 +45,22 @@ async function initializeG2(): Promise<void> {
     const app = import.meta.env.VITE_FAKE_DISCORD === 'true'
       ? new App(bridge, new DummyDiscordRepository(), reportPhase)
       : new App(bridge, undefined, reportPhase)
-    const renderPhoneStatus = (): void => {
-      if (!statusElement) return
-      const loginUrl = app.loginUrl()
-      if (app.needsDiscordLogin() && loginUrl) { showDiscordLogin(statusElement, loginUrl); return }
-      if (app.hasConnectionFailure() && loginUrl) {
-        showConnectionFailure(statusElement, loginUrl, () => { void app.retryChannels() }); return
+    renderPhoneStatus = (): void => {
+      displayedStartupResult = app.getStartupResult()
+      displayedFingerprint = app.getStartupFingerprint()
+      const body = createPhoneBody()
+      if (!body) return
+      if (displayedStartupResult !== 'pending' && displayedStartupResult !== StartUpPageCreateResult.success) {
+        body.textContent = `Startup payload fingerprint: ${displayedFingerprint}`
+        return
       }
-      if (app.hasTargetConfigurationFailure()) { showStatus('Target Discord server is not configured'); return }
-      showStatus('G2 display initialized successfully.')
+      const loginUrl = app.loginUrl()
+      if (app.needsDiscordLogin() && loginUrl) { showDiscordLogin(body, loginUrl); return }
+      if (app.hasConnectionFailure() && loginUrl) {
+        showConnectionFailure(body, loginUrl, () => { void app.retryChannels() }); return
+      }
+      if (app.hasTargetConfigurationFailure()) { body.textContent = 'Target Discord server is not configured'; return }
+      body.textContent = 'G2 display initialized successfully.'
     }
     app.onStatusChange(renderPhoneStatus)
     await app.start()
@@ -51,7 +72,8 @@ async function initializeG2(): Promise<void> {
   } catch (error) {
     const safeText = startupFailureText(phase, error)
     console.error('Glass Assistant startup failed', { phase, error: safeText.split('\n').at(-1) })
-    showStatus(safeText)
+    if (displayedStartupResult === 'pending') showStatus(safeText)
+    else renderPhoneStatus?.()
   }
 }
 

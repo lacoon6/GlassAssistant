@@ -78,6 +78,10 @@ export class BackendClient {
     return this.request(`/api/discord/channels?guildId=${encodeURIComponent(guildId)}`)
   }
 
+  public DefaultChannels(): Promise<readonly BackendChannel[]> {
+    return this.request('/api/discord/default/channels')
+  }
+
   public Messages(channelId: string): Promise<readonly BackendMessage[]> {
     return this.request(`/api/discord/messages?channelId=${encodeURIComponent(channelId)}`)
   }
@@ -86,19 +90,14 @@ export class BackendClient {
     const controller = new AbortController()
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      const operation = this.performRequest<T>(path, controller.signal)
-      const timedOut = new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => {
-          controller.abort()
-          reject(new BackendApiError('NETWORK_OR_CORS_ERROR'))
-        }, this.requestTimeoutMs)
-      })
-      return await Promise.race([operation, timedOut])
+      return await Promise.race([
+        this.performRequest<T>(path, controller.signal),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => { controller.abort(); reject(new BackendApiError('NETWORK_OR_CORS_ERROR')) }, this.requestTimeoutMs)
+        }),
+      ])
     } catch (error) {
-      if (error instanceof BackendApiError) {
-        this.logDiagnostic(error.code, error.status)
-        throw error
-      }
+      if (error instanceof BackendApiError) { this.logDiagnostic(error.code, error.status); throw error }
       this.logDiagnostic('NETWORK_OR_CORS_ERROR')
       throw new BackendApiError('NETWORK_OR_CORS_ERROR')
     } finally {

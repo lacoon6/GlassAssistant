@@ -10,7 +10,7 @@ export class GetChannelsUseCase {
 
   public SelectGuild(guildId: string): void { this.guildId = guildId; this.channels = []; this.status = 'loading' }
   public BeginLoad(): void { this.status = 'loading' }
-  public SetFailure(status: Exclude<LoadStatus, 'loading' | 'fresh'>): void { this.channels = []; this.status = status }
+  public SetFailure(status: Exclude<LoadStatus, 'loading' | 'fresh' | 'cached'>): void { this.channels = []; this.status = status }
 
   public async Load(): Promise<void> {
     this.status = 'loading'

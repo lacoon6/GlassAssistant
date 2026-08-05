@@ -62,7 +62,12 @@ export class BackendDiscordRepository implements DiscordRepository {
       this.loggedIn = true
       return { status: 'fresh', servers: values.map(value => new DiscordServer(value.id, value.name, value.unreadCount ?? 0)) }
     } catch (error) {
-      return this.serverFailure(error)
+      if (error instanceof BackendApiError) return {
+        status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' :
+          error.code === 'DISCORD_TARGET_GUILD_REQUIRED' ? 'target-not-configured' : 'network-error',
+        servers: [], errorCode: error.code,
+      }
+      return { status: 'network-error', servers: [] }
     }
   }
 
@@ -107,14 +112,4 @@ export class BackendDiscordRepository implements DiscordRepository {
   public isLoggedIn(): boolean { return this.loggedIn }
   public isBackendConfigured(): boolean { return this.backend.IsConfigured() }
   public loginUrl(): string | null { return this.backend.LoginUrl() }
-
-  private serverFailure(error: unknown): ServerRepositoryResult {
-    if (error instanceof BackendApiError) return {
-      status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' :
-        error.code === 'DISCORD_TARGET_GUILD_REQUIRED' ? 'target-not-configured' :
-          error.code === 'NETWORK_OR_CORS_ERROR' || (error.status !== undefined && error.status >= 500) ? 'network-error' : 'error',
-      servers: [], errorCode: error.code,
-    }
-    return { status: typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'network-error', servers: [] }
-  }
 }

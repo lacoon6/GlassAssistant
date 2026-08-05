@@ -1,7 +1,7 @@
 {
   "name": "glass-assistant",
   "private": true,
-  "version": "0.10.10",
+  "version": "0.10.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "build": "vite build --base=/app/ --outDir dist",
     "build:ehpk": "vite build --mode ehpk --base=./ --outDir dist-ehpk",
     "preview": "vite preview",
-    "pack": "npm run build:ehpk && evenhub pack app.json dist-ehpk -o glass-assistant-v0.10.10.ehpk",
+    "pack": "npm run build:ehpk && evenhub pack app.json dist-ehpk -o glass-assistant-v0.10.11.ehpk",
     "simulate": "evenhub-simulator http://localhost:5173"
   },
   "dependencies": {

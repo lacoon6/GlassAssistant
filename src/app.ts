@@ -1,6 +1,6 @@
 import {
   CreateStartUpPageContainer, EventSourceType, type EvenAppBridge, type EvenHubEvent,
-  OsEventTypeList, StartUpPageCreateResult, TextContainerProperty,
+  OsEventTypeList, StartUpPageCreateResult, TextContainerProperty, TextContainerUpgrade,
 } from '@evenrealities/even_hub_sdk'
 import { type Page, type PageAction, type PageId } from './page'
 import { ChannelPage } from './pages/channel'
@@ -13,8 +13,8 @@ import { StartupContainerResultError, startupResultName, type StartupPhase } fro
 
 const stateKey = 'glass-assistant.state.v1'
 const staleAfterMs = 5 * 60 * 1000
-const defaultStorageTimeoutMs = 1500
-const defaultBridgeTimeoutMs = 3000
+const storageTimeoutMs = 1500
+const bridgeTimeoutMs = 3000
 export type AppBridge = Pick<EvenAppBridge, 'createStartUpPageContainer' | 'textContainerUpgrade' |
   'shutDownPageContainer' | 'onEvenHubEvent' | 'setLocalStorage' | 'getLocalStorage'>
 interface AppSnapshot {
@@ -26,16 +26,20 @@ interface AppSnapshot {
   updatedAt: number
 }
 
-interface AppTimeouts {
-  readonly storageMs?: number
-  readonly bridgeMs?: number
+export function serializeStartupPayload(container: CreateStartUpPageContainer): Record<string, unknown> {
+  return CreateStartUpPageContainer.toJson(container)
 }
 
-class BridgeOperationTimeoutError extends Error {
-  public constructor(operation: string, timeoutMs: number) {
-    super(`${operation} timed out after ${timeoutMs}ms`)
-    this.name = 'BridgeOperationTimeoutError'
+export function startupPayloadFingerprint(payload: Record<string, unknown>): string {
+  const comparable = { ...payload }
+  delete comparable.widgetId
+  const value = JSON.stringify(comparable)
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
   }
+  return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
 export function createMinimalStartupContainer(): CreateStartUpPageContainer {
@@ -73,12 +77,13 @@ export class App {
   private initialLoadPromise?: Promise<void>
   private lastUpdatedAt = 0
   private statusListener?: () => void
+  private startupResult: number | 'pending' = 'pending'
+  private startupFingerprint = ''
 
   public constructor(
     private readonly bridge: AppBridge,
     private readonly discord: DiscordRepository = new BackendDiscordRepository(),
     private readonly reportPhase: (phase: StartupPhase, detail?: string) => void = () => undefined,
-    private readonly timeouts: AppTimeouts = {},
   ) {
     this.getServers = new GetServersUseCase(discord)
     this.getChannels = new GetChannelsUseCase(discord)
@@ -96,7 +101,10 @@ export class App {
   private async startCore(): Promise<void> {
     this.reportPhase('startup-container')
     const startupContainer = createMinimalStartupContainer()
-    const result = await this.enqueueBridge(() => this.bridge.createStartUpPageContainer(startupContainer), 'createStartUpPageContainer')
+    this.startupFingerprint = startupPayloadFingerprint(serializeStartupPayload(startupContainer))
+    const result = await this.enqueueBridge(() => this.bridge.createStartUpPageContainer(startupContainer))
+    this.startupResult = result
+    this.statusListener?.()
     this.reportPhase('startup-container', `${result} (${startupResultName(result)})`)
     if (result !== StartUpPageCreateResult.success) throw new StartupContainerResultError(result)
 
@@ -107,7 +115,7 @@ export class App {
 
     this.currentPage = this.channelPage
     this.channelPage.BeginLoad()
-    await this.renderCurrentPage()
+    await this.updateText('Build v0.10.11\nLoading channels...')
     this.initialLoadPromise = this.loadInitialChannels()
     void this.initialLoadPromise
   }
@@ -115,19 +123,20 @@ export class App {
   public needsDiscordLogin(): boolean { return this.channelPage.getStatus() === 'login-required' }
   public hasConnectionFailure(): boolean { return this.channelPage.getStatus() === 'network-error' }
   public hasTargetConfigurationFailure(): boolean { return this.channelPage.getStatus() === 'target-not-configured' }
+  public getStartupResult(): number | 'pending' { return this.startupResult }
+  public getStartupFingerprint(): string { return this.startupFingerprint }
   public login(): Promise<void> { return this.discord.login() }
   public loginUrl(): string | null { return this.discord.loginUrl() }
   public onStatusChange(listener: () => void): void { this.statusListener = listener }
   public whenInitialChannelsLoaded(): Promise<void> { return this.initialLoadPromise ?? Promise.resolve() }
   public async retryChannels(): Promise<void> {
-    this.channelPage.BeginLoad(); this.currentPage = this.channelPage; await this.renderCurrentPage()
-    await this.resolveAndLoadChannels(); this.lastUpdatedAt = Date.now()
-    try { await this.renderCurrentPage() } finally { this.statusListener?.() }
+    this.channelPage.BeginLoad(); await this.renderCurrentPage(); await this.resolveAndLoadChannels(); this.lastUpdatedAt = Date.now()
+    this.currentPage = this.channelPage; await this.renderCurrentPage(); this.statusListener?.()
   }
 
   private async loadInitialChannels(): Promise<void> {
     this.reportPhase('storage-restore')
-    const snapshotPromise = this.readSnapshotWithTimeout(this.timeouts.storageMs ?? defaultStorageTimeoutMs)
+    const snapshotPromise = this.readSnapshotWithTimeout()
     this.reportPhase('discord-load')
     const channelsPromise = this.resolveAndLoadChannels()
     const [snapshotResult] = await Promise.allSettled([snapshotPromise, channelsPromise])
@@ -135,15 +144,7 @@ export class App {
     this.channelPage.restoreChannelSelection(snapshot?.selectedChannelId, snapshot?.selectedChannelIndex ?? 0)
     this.currentPage = this.channelPage
     this.lastUpdatedAt = Date.now()
-    try {
-      await this.renderCurrentPage()
-    } catch (error) {
-      console.error('Initial G2 channel update failed', {
-        phase: 'text-update', error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-      })
-    } finally {
-      this.statusListener?.()
-    }
+    try { await this.renderCurrentPage() } finally { this.statusListener?.() }
   }
 
   private async resolveAndLoadChannels(): Promise<void> {
@@ -200,12 +201,12 @@ export class App {
 
   private async goBack(): Promise<void> {
     const previous = this.pageHistory.pop()
-    if (!previous) { await this.enqueueBridge(() => this.bridge.shutDownPageContainer(1), 'shutDownPageContainer', this.bridgeTimeoutMs()); return }
+    if (!previous) { await this.enqueueBridge(() => this.bridge.shutDownPageContainer(1)); return }
     this.currentPage = previous; await this.renderCurrentPage(); this.schedulePersist()
   }
 
   private async restoreOnForeground(): Promise<void> {
-    const snapshot = await this.readSnapshotWithTimeout(this.timeouts.storageMs ?? defaultStorageTimeoutMs)
+    const snapshot = await this.readSnapshot()
     if (snapshot) {
       if (snapshot.selectedChannelId) this.channelPage.setRestoreChannelId(snapshot.selectedChannelId)
       this.channelPage.restoreSelection(snapshot.selectedChannelIndex, Number.MAX_SAFE_INTEGER)
@@ -220,19 +221,21 @@ export class App {
 
   private async renderCurrentPage(): Promise<boolean> {
     this.reportPhase('text-update')
-    const updated = await this.enqueueBridge(
-      () => this.bridge.textContainerUpgrade(this.currentPage.createTextUpgrade()), 'textContainerUpgrade', this.bridgeTimeoutMs())
+    const updated = await this.enqueueBridge(() => this.bridge.textContainerUpgrade(this.currentPage.createTextUpgrade()))
+    if (!updated) throw new Error('textContainerUpgrade failed')
+    return true
+  }
+  private async updateText(content: string): Promise<boolean> {
+    this.reportPhase('text-update')
+    const updated = await this.enqueueBridge(() => this.bridge.textContainerUpgrade(new TextContainerUpgrade({
+      containerID: 1, containerName: 'main', contentOffset: 0, contentLength: 0, content,
+    })))
     if (!updated) throw new Error('textContainerUpgrade failed')
     return true
   }
   private schedulePersist(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer)
-    this.saveTimer = setTimeout(() => {
-      this.saveTimer = undefined
-      void this.persistNow().catch(error => console.error('G2 state save failed', {
-        error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-      }))
-    }, 80)
+    this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.persistNow() }, 80)
   }
   private persistNow(): Promise<unknown> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined }
@@ -241,11 +244,10 @@ export class App {
       selectedChannelIndex: this.channelPage.getSelectedIndex(), selectedMessageIndex: this.messagePage.getSelectedIndex(),
       selectedChannelId: this.channelPage.getSelectedChannelId(), viewportStart: this.currentPage.getViewportStart(), updatedAt: Date.now(),
     }
-    return this.enqueueBridge(
-      () => this.bridge.setLocalStorage(stateKey, JSON.stringify(snapshot)), 'setLocalStorage', this.bridgeTimeoutMs())
+    return this.enqueueBridge(() => this.bridge.setLocalStorage(stateKey, JSON.stringify(snapshot)))
   }
   private async readSnapshot(): Promise<AppSnapshot | null> {
-    const stored = await this.enqueueBridge(() => this.bridge.getLocalStorage(stateKey), 'getLocalStorage', this.bridgeTimeoutMs())
+    const stored = await this.enqueueBridgeWithTimeout(() => this.bridge.getLocalStorage(stateKey), 'getLocalStorage')
     try {
       const parsed = JSON.parse(stored) as Partial<AppSnapshot>
       if ((parsed.currentPageId !== 'channels' && parsed.currentPageId !== 'messages') ||
@@ -254,25 +256,27 @@ export class App {
       return parsed as AppSnapshot
     } catch { return null }
   }
-  private async readSnapshotWithTimeout(timeoutMs: number): Promise<AppSnapshot | null> {
+  private async readSnapshotWithTimeout(): Promise<AppSnapshot | null> {
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
       return await Promise.race([
         this.readSnapshot().catch(() => null),
-        new Promise<null>(resolve => { timeout = setTimeout(() => resolve(null), timeoutMs) }),
+        new Promise<null>(resolve => { timeout = setTimeout(() => resolve(null), storageTimeoutMs) }),
       ])
-    } finally {
-      if (timeout) clearTimeout(timeout)
-    }
+    } finally { if (timeout) clearTimeout(timeout) }
   }
-  private bridgeTimeoutMs(): number { return this.timeouts.bridgeMs ?? defaultBridgeTimeoutMs }
-  private enqueueBridge<T>(operation: () => Promise<T>, name: string, timeoutMs?: number): Promise<T> {
+  private enqueueBridge<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.bridgeQueue.then(operation)
+    this.bridgeQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+  private enqueueBridgeWithTimeout<T>(operation: () => Promise<T>, name: string): Promise<T> {
     const started = this.bridgeQueue.then(operation)
     let timeout: ReturnType<typeof setTimeout> | undefined
-    const result = timeoutMs === undefined ? started : Promise.race([
+    const result = Promise.race([
       started,
       new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new BridgeOperationTimeoutError(name, timeoutMs)), timeoutMs)
+        timeout = setTimeout(() => reject(new Error(`${name} timed out after ${bridgeTimeoutMs}ms`)), bridgeTimeoutMs)
       }),
     ]).finally(() => { if (timeout) clearTimeout(timeout) })
     this.bridgeQueue = result.then(() => undefined, () => undefined)
