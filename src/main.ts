@@ -38,6 +38,7 @@ async function initializeG2(): Promise<void> {
       if (app.hasConnectionFailure() && loginUrl) {
         showConnectionFailure(statusElement, loginUrl, () => { void app.retryChannels() }); return
       }
+      if (app.hasTargetConfigurationFailure()) { showStatus('Target Discord server is not configured'); return }
       showStatus('G2 display initialized successfully.')
     }
     app.onStatusChange(renderPhoneStatus)

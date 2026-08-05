@@ -35,6 +35,11 @@ export class DiscordApiService {
     return guilds.map(guild => ({ id: guild.id, name: guild.name, unreadCount: 0 }))
   }
 
+  public async getResolvedServers(accessToken: string, configuredGuildId?: string): Promise<unknown> {
+    const guild = await this.resolveTargetGuild(accessToken, configuredGuildId)
+    return [{ id: guild.id, name: guild.name, unreadCount: 0 }]
+  }
+
   public async getChannels(accessToken: string, guildId: string): Promise<unknown> {
     await this.requireGuildMembership(accessToken, guildId)
     const channels = await this.getWithBot<DiscordChannel[]>(
@@ -53,8 +58,8 @@ export class DiscordApiService {
   }
 
   public async getDefaultChannels(accessToken: string, configuredGuildId?: string): Promise<unknown> {
-    const guildId = await this.resolveTargetGuild(accessToken, configuredGuildId)
-    return this.getChannelsForGuild(guildId)
+    const guild = await this.resolveTargetGuild(accessToken, configuredGuildId)
+    return this.getChannelsForGuild(guild.id)
   }
 
   public async getMessages(accessToken: string, channelId: string): Promise<unknown> {
@@ -88,7 +93,7 @@ export class DiscordApiService {
     if (!guilds.some(guild => guild.id === guildId)) throw new DiscordApiError(403, 'USER_NOT_IN_GUILD')
   }
 
-  private async resolveTargetGuild(accessToken: string, configuredGuildId?: string): Promise<string> {
+  private async resolveTargetGuild(accessToken: string, configuredGuildId?: string): Promise<DiscordGuild> {
     const [userGuilds, botGuilds] = await Promise.all([
       this.getUserGuilds(accessToken),
       this.getWithBot<DiscordGuild[]>('/users/@me/guilds', 'botGuilds'),
@@ -98,12 +103,12 @@ export class DiscordApiService {
     if (configuredGuildId) {
       if (!userIds.has(configuredGuildId)) throw new DiscordApiError(403, 'USER_NOT_IN_GUILD')
       if (!botIds.has(configuredGuildId)) throw new DiscordApiError(403, 'BOT_NOT_IN_GUILD')
-      return configuredGuildId
+      return userGuilds.find(guild => guild.id === configuredGuildId)!
     }
     const common = [...userIds].filter(id => botIds.has(id))
     if (common.length === 0) throw new DiscordApiError(403, 'BOT_NOT_IN_GUILD')
     if (common.length > 1) throw new DiscordApiError(409, 'DISCORD_TARGET_GUILD_REQUIRED')
-    return common[0]!
+    return userGuilds.find(guild => guild.id === common[0])!
   }
 
   private async getChannelsForGuild(guildId: string): Promise<unknown> {

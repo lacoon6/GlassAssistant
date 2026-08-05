@@ -40,6 +40,7 @@ export class BackendClient {
     apiUrl: string,
     private readonly fetcher: typeof fetch = fetch,
     private readonly navigate: (url: string) => void = url => window.location.assign(url),
+    private readonly requestTimeoutMs = 8000,
   ) {
     this.baseUrl = apiUrl.trim().replace(/\/$/, '')
   }
@@ -77,31 +78,46 @@ export class BackendClient {
     return this.request(`/api/discord/channels?guildId=${encodeURIComponent(guildId)}`)
   }
 
-  public DefaultChannels(): Promise<readonly BackendChannel[]> {
-    return this.request('/api/discord/default/channels')
-  }
-
   public Messages(channelId: string): Promise<readonly BackendMessage[]> {
     return this.request(`/api/discord/messages?channelId=${encodeURIComponent(channelId)}`)
   }
 
   private async request<T>(path: string): Promise<T> {
-    let response: Response
+    const controller = new AbortController()
+    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      response = await this.fetcher(this.url(path), { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } })
+      const operation = this.performRequest<T>(path, controller.signal)
+      const timedOut = new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort()
+          reject(new BackendApiError('NETWORK_OR_CORS_ERROR'))
+        }, this.requestTimeoutMs)
+      })
+      return await Promise.race([operation, timedOut])
     } catch (error) {
+      if (error instanceof BackendApiError) {
+        this.logDiagnostic(error.code, error.status)
+        throw error
+      }
       this.logDiagnostic('NETWORK_OR_CORS_ERROR')
-      if (error instanceof TypeError) throw new BackendApiError('NETWORK_OR_CORS_ERROR')
-      throw error
+      throw new BackendApiError('NETWORK_OR_CORS_ERROR')
+    } finally {
+      if (timeout) clearTimeout(timeout)
     }
+  }
+
+  private async performRequest<T>(path: string, signal: AbortSignal): Promise<T> {
+    const response = await this.fetcher(this.url(path), {
+      method: 'GET', credentials: 'include', headers: { Accept: 'application/json' }, signal,
+    })
     if (!response.ok) {
-      let code: BackendErrorCode = response.status === 401 ? 'DISCORD_LOGIN_REQUIRED' : 'UNKNOWN'
+      if (response.status === 401) throw new BackendApiError('DISCORD_LOGIN_REQUIRED', 401)
+      let code: BackendErrorCode = 'UNKNOWN'
       try {
         const body = await response.json() as { error?: unknown }
         const safeCodes: readonly string[] = ['BOT_NOT_IN_GUILD', 'BOT_CHANNEL_ACCESS_DENIED', 'MESSAGE_HISTORY_ACCESS_DENIED', 'USER_NOT_IN_GUILD', 'DISCORD_TARGET_GUILD_REQUIRED']
         if (typeof body.error === 'string' && safeCodes.includes(body.error)) code = body.error as BackendErrorCode
       } catch { /* Never expose response details. */ }
-      this.logDiagnostic(code, response.status)
       throw new BackendApiError(code, response.status)
     }
     return (await response.json()) as T

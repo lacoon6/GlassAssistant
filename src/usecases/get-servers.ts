@@ -1,9 +1,9 @@
 import type { DiscordServer } from '../models/server'
-import type { DiscordRepository } from '../services/discord'
+import type { DiscordRepository, LoadStatus } from '../services/discord'
 
 export class GetServersUseCase {
   private servers: readonly DiscordServer[] = []
-  private status: 'loading' | 'fresh' | 'cached' | 'offline' | 'error' = 'loading'
+  private status: LoadStatus = 'loading'
 
   public constructor(private readonly repository: DiscordRepository) {}
 
@@ -22,7 +22,7 @@ export class GetServersUseCase {
     return this.repository.isLoggedIn()
   }
 
-  public GetStatus(): 'loading' | 'fresh' | 'cached' | 'offline' | 'error' {
+  public GetStatus(): LoadStatus {
     return this.status
   }
 }

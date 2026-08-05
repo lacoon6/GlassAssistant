@@ -109,6 +109,38 @@ test('multiple shared guilds require explicit target configuration', async () =>
   )
 })
 
+test('resolved server listing automatically returns the only shared guild', async () => {
+  globalThis.fetch = async (input, init) => {
+    const authorization = new Headers(init?.headers).get('authorization')
+    return authorization === 'Bearer user-token'
+      ? jsonResponse([{ id: 'shared', name: 'Shared' }, { id: 'user-only', name: 'User only' }])
+      : jsonResponse([{ id: 'shared', name: 'Bot shared' }])
+  }
+  assert.deepEqual(await new DiscordApiService('bot-token').getResolvedServers('user-token'), [
+    { id: 'shared', name: 'Shared', unreadCount: 0 },
+  ])
+})
+
+test('configured guild is preferred by resolved server listing', async () => {
+  globalThis.fetch = async (_input, init) => {
+    const authorization = new Headers(init?.headers).get('authorization')
+    return authorization === 'Bearer user-token'
+      ? jsonResponse([{ id: 'other', name: 'Other' }, { id: 'target', name: 'Target' }])
+      : jsonResponse([{ id: 'other', name: 'Other' }, { id: 'target', name: 'Target' }])
+  }
+  assert.deepEqual(await new DiscordApiService('bot-token').getResolvedServers('user-token', 'target'), [
+    { id: 'target', name: 'Target', unreadCount: 0 },
+  ])
+})
+
+test('resolved server listing rejects multiple shared guilds without configuration', async () => {
+  globalThis.fetch = async () => jsonResponse([{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }])
+  await assert.rejects(
+    new DiscordApiService('bot-token').getResolvedServers('user-token'),
+    (error: unknown) => error instanceof DiscordApiError && error.code === 'DISCORD_TARGET_GUILD_REQUIRED',
+  )
+})
+
 test('configured target requires both user and bot membership', async () => {
   let call = 0
   globalThis.fetch = async () => { call += 1; return jsonResponse(call === 1 ? [{ id: 'target', name: 'hidden' }] : []) }

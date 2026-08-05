@@ -1,19 +1,22 @@
 import type { DiscordChannel } from '../models/channel'
-import type { DiscordRepository } from '../services/discord'
+import type { DiscordRepository, LoadStatus } from '../services/discord'
 
 export class GetChannelsUseCase {
   private channels: readonly DiscordChannel[] = []
-  private status: 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' | 'network-error' = 'loading'
+  private guildId: string | null = null
+  private status: LoadStatus = 'loading'
 
   public constructor(private readonly repository: DiscordRepository) {}
 
-  public SelectGuild(_guildId: string): void { this.channels = []; this.status = 'loading' }
+  public SelectGuild(guildId: string): void { this.guildId = guildId; this.channels = []; this.status = 'loading' }
   public BeginLoad(): void { this.status = 'loading' }
+  public SetFailure(status: Exclude<LoadStatus, 'loading' | 'fresh'>): void { this.channels = []; this.status = status }
 
   public async Load(): Promise<void> {
     this.status = 'loading'
+    if (!this.guildId) { this.SetFailure('target-not-configured'); return }
     try {
-      const result = await this.repository.getChannels()
+      const result = await this.repository.getChannels(this.guildId)
       this.channels = result.channels.filter(channel =>
         (channel.kind === 'text' || channel.kind === 'announcement') && !channel.readOnly,
       )
@@ -28,7 +31,7 @@ export class GetChannelsUseCase {
     return this.channels
   }
 
-  public GetStatus(): 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' | 'network-error' {
+  public GetStatus(): LoadStatus {
     return this.status
   }
 }

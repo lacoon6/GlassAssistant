@@ -1,23 +1,28 @@
 import { DiscordChannel } from '../models/channel'
 import { DiscordMessage } from '../models/message'
-import type { DiscordServer } from '../models/server'
+import { DiscordServer } from '../models/server'
 import { BackendApiError, BackendClient, type BackendErrorCode } from './backend'
 
-export type LoadStatus = 'loading' | 'fresh' | 'offline' | 'error' | 'login-required' | 'network-error'
+export type LoadStatus = 'loading' | 'fresh' | 'cached' | 'offline' | 'error' | 'login-required' | 'network-error' | 'target-not-configured'
+export interface ServerRepositoryResult {
+  readonly status: LoadStatus
+  readonly servers: readonly DiscordServer[]
+  readonly errorCode?: BackendErrorCode
+}
 export interface ChannelRepositoryResult {
   readonly status: LoadStatus
   readonly channels: readonly DiscordChannel[]
   readonly errorCode?: BackendErrorCode
 }
 export interface MessageRepositoryResult {
-  readonly status: Exclude<LoadStatus, 'offline' | 'network-error'> | 'network-error'
+  readonly status: 'fresh' | 'error' | 'login-required' | 'network-error'
   readonly messages: readonly DiscordMessage[]
   readonly errorCode?: BackendErrorCode
 }
 
 export interface DiscordRepository {
-  getServers(): Promise<{ status: 'fresh' | 'cached' | 'offline' | 'error'; servers: readonly DiscordServer[] }>
-  getChannels(): Promise<ChannelRepositoryResult>
+  getServers(): Promise<ServerRepositoryResult>
+  getChannels(guildId: string): Promise<ChannelRepositoryResult>
   getMessages(channelId: string): Promise<MessageRepositoryResult>
   login(): Promise<void>
   logout(): Promise<void>
@@ -27,8 +32,10 @@ export interface DiscordRepository {
 }
 
 export class DummyDiscordRepository implements DiscordRepository {
-  public getServers(): Promise<{ status: 'fresh'; servers: readonly DiscordServer[] }> { return Promise.resolve({ status: 'fresh', servers: [] }) }
-  public getChannels(): Promise<ChannelRepositoryResult> {
+  public getServers(): Promise<ServerRepositoryResult> {
+    return Promise.resolve({ status: 'fresh', servers: [new DiscordServer('internal', 'Internal')] })
+  }
+  public getChannels(_guildId: string): Promise<ChannelRepositoryResult> {
     return Promise.resolve({ status: 'fresh', channels: Array.from({ length: 12 }, (_, index) =>
       new DiscordChannel(String(index + 1), 'internal', `channel-${index + 1}`, 0, index === 1 ? 'announcement' : 'text', null, index),
     ) })
@@ -49,11 +56,19 @@ export class DummyDiscordRepository implements DiscordRepository {
 export class BackendDiscordRepository implements DiscordRepository {
   private loggedIn = false
   public constructor(private readonly backend = new BackendClient(import.meta.env.VITE_API_URL ?? '')) {}
-  public async getServers(): Promise<{ status: 'fresh' | 'error'; servers: readonly DiscordServer[] }> { return { status: 'error', servers: [] } }
-
-  public async getChannels(): Promise<ChannelRepositoryResult> {
+  public async getServers(): Promise<ServerRepositoryResult> {
     try {
-      const values = await this.backend.DefaultChannels()
+      const values = await this.backend.Servers()
+      this.loggedIn = true
+      return { status: 'fresh', servers: values.map(value => new DiscordServer(value.id, value.name, value.unreadCount ?? 0)) }
+    } catch (error) {
+      return this.serverFailure(error)
+    }
+  }
+
+  public async getChannels(guildId: string): Promise<ChannelRepositoryResult> {
+    try {
+      const values = await this.backend.Channels(guildId)
       const channels = values
         .filter(value => (value.type === 0 || value.type === 5) && value.name.length > 0)
         .sort((left, right) => left.position !== right.position ? (left.position ?? 0) - (right.position ?? 0) : left.id.localeCompare(right.id))
@@ -92,4 +107,14 @@ export class BackendDiscordRepository implements DiscordRepository {
   public isLoggedIn(): boolean { return this.loggedIn }
   public isBackendConfigured(): boolean { return this.backend.IsConfigured() }
   public loginUrl(): string | null { return this.backend.LoginUrl() }
+
+  private serverFailure(error: unknown): ServerRepositoryResult {
+    if (error instanceof BackendApiError) return {
+      status: error.code === 'DISCORD_LOGIN_REQUIRED' ? 'login-required' :
+        error.code === 'DISCORD_TARGET_GUILD_REQUIRED' ? 'target-not-configured' :
+          error.code === 'NETWORK_OR_CORS_ERROR' || (error.status !== undefined && error.status >= 500) ? 'network-error' : 'error',
+      servers: [], errorCode: error.code,
+    }
+    return { status: typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'network-error', servers: [] }
+  }
 }

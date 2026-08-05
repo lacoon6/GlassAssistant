@@ -17,12 +17,18 @@ export class ChannelPage extends Page {
   public BeginLoad(): void { this.getChannels.BeginLoad() }
   public getStatus() { return this.getChannels.GetStatus() }
   public setRestoreChannelId(id?: string): void { this.restoreChannelId = id }
+  public restoreChannelSelection(id: string | undefined, fallbackIndex: number): void {
+    const channels = this.getChannels.Execute()
+    const restored = id ? channels.findIndex(channel => channel.id === id) : -1
+    this.restoreSelection(restored >= 0 ? restored : fallbackIndex, channels.length)
+  }
   public getSelectedChannelId(): string | undefined { return this.getChannels.Execute()[this.selectedIndex]?.id }
   protected render(): string {
     const channels = this.getChannels.Execute(); const status = this.getChannels.GetStatus()
     if (status === 'loading') return 'Discord\n\nLoading channels...'
     if (status === 'login-required') return 'Discord login required\nPress once or open phone'
     if (status === 'network-error') return 'Connection failed\nCheck the phone app'
+    if (status === 'target-not-configured') return 'Target Discord server is not configured'
     if (status === 'offline') return 'Discord\n\nOffline'
     if (status === 'error') return 'Discord\n\nFailed to load Discord'
     if (channels.length === 0) return 'Discord\n\nNo readable channels'

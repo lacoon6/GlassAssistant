@@ -10,7 +10,7 @@ discordRouter.use(requireDiscordAuth)
 
 discordRouter.get('/servers', async (_request, response, next) => {
   try {
-    response.json(await discord.getServers(response.locals.discordAccessToken))
+    response.json(await discord.getResolvedServers(response.locals.discordAccessToken, env.discordTargetGuildId))
   } catch (error) {
     next(error)
   }

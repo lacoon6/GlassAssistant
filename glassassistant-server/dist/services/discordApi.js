@@ -8,6 +8,10 @@ export class DiscordApiService {
         const guilds = await this.getUserGuilds(accessToken);
         return guilds.map(guild => ({ id: guild.id, name: guild.name, unreadCount: 0 }));
     }
+    async getResolvedServers(accessToken, configuredGuildId) {
+        const guild = await this.resolveTargetGuild(accessToken, configuredGuildId);
+        return [{ id: guild.id, name: guild.name, unreadCount: 0 }];
+    }
     async getChannels(accessToken, guildId) {
         await this.requireGuildMembership(accessToken, guildId);
         const channels = await this.getWithBot(`/guilds/${encodeURIComponent(guildId)}/channels`, 'guildChannels');
@@ -22,8 +26,8 @@ export class DiscordApiService {
         }));
     }
     async getDefaultChannels(accessToken, configuredGuildId) {
-        const guildId = await this.resolveTargetGuild(accessToken, configuredGuildId);
-        return this.getChannelsForGuild(guildId);
+        const guild = await this.resolveTargetGuild(accessToken, configuredGuildId);
+        return this.getChannelsForGuild(guild.id);
     }
     async getMessages(accessToken, channelId) {
         const channel = await this.getWithBot(`/channels/${encodeURIComponent(channelId)}`, 'channel');
@@ -61,14 +65,14 @@ export class DiscordApiService {
                 throw new DiscordApiError(403, 'USER_NOT_IN_GUILD');
             if (!botIds.has(configuredGuildId))
                 throw new DiscordApiError(403, 'BOT_NOT_IN_GUILD');
-            return configuredGuildId;
+            return userGuilds.find(guild => guild.id === configuredGuildId);
         }
         const common = [...userIds].filter(id => botIds.has(id));
         if (common.length === 0)
             throw new DiscordApiError(403, 'BOT_NOT_IN_GUILD');
         if (common.length > 1)
             throw new DiscordApiError(409, 'DISCORD_TARGET_GUILD_REQUIRED');
-        return common[0];
+        return userGuilds.find(guild => guild.id === common[0]);
     }
     async getChannelsForGuild(guildId) {
         const channels = await this.getWithBot(`/guilds/${encodeURIComponent(guildId)}/channels`, 'guildChannels');
