@@ -1,19 +1,20 @@
 {
   "name": "glass-assistant",
   "private": true,
-  "version": "0.10.6",
+  "version": "0.10.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/**/*.test.ts",
-    "build": "tsc --noEmit && vite build --base=/app/ --outDir dist",
-    "build:ehpk": "tsc --noEmit && vite build --mode ehpk --base=./ --outDir dist-ehpk",
+    "build": "vite build --base=/app/ --outDir dist",
+    "build:ehpk": "vite build --mode ehpk --base=./ --outDir dist-ehpk",
     "preview": "vite preview",
-    "pack": "npm run build:ehpk && evenhub pack app.json dist-ehpk -o glass-assistant-v0.10.6.ehpk",
+    "pack": "npm run build:ehpk && evenhub pack app.json dist-ehpk -o glass-assistant-v0.10.8.ehpk",
     "simulate": "evenhub-simulator http://localhost:5173"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "^0.0.10"
+    "@evenrealities/even_hub_sdk": "0.0.12"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.12",

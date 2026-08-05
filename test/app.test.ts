@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
   CreateStartUpPageContainer, EventSourceType, OsEventTypeList, StartUpPageCreateResult,
-  type EvenHubEvent, type TextContainerProperty, type TextContainerUpgrade,
+  type EvenHubEvent, TextContainerProperty, type TextContainerUpgrade,
 } from '@evenrealities/even_hub_sdk'
 import { App, createMinimalStartupContainer, type AppBridge } from '../src/app.js'
 import { BackendApiError, BackendClient } from '../src/services/backend.js'
@@ -82,27 +82,42 @@ test('startup opens filtered Discord channels and creates startup once', async (
   assert.doesNotMatch(bridge.rebuilds.join('\n'), /Settings|Servers|private-name|voice|Sensei/)
 })
 
-test('minimal startup container serializes as the device-safe SDK 0.0.10 plain object', () => {
+test('manifest and installed dependency use SDK 0.0.12', () => {
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    dependencies: Record<string, string>
+  }
+  const appJson = JSON.parse(readFileSync(new URL('../app.json', import.meta.url), 'utf8')) as {
+    version: string; min_sdk_version: string
+  }
+  assert.equal(packageJson.dependencies['@evenrealities/even_hub_sdk'], '0.0.12')
+  assert.equal(appJson.version, '0.10.8')
+  assert.equal(appJson.min_sdk_version, '0.0.12')
+})
+
+test('minimal startup container uses SDK 0.0.12 classes and official fields', () => {
   const startup = createMinimalStartupContainer()
   const serialized = CreateStartUpPageContainer.toJson(startup)
+  assert.ok(startup instanceof CreateStartUpPageContainer)
   assert.equal(startup.containerTotalNum, 1)
   assert.equal(startup.listObject, undefined); assert.equal(startup.imageObject, undefined)
   assert.equal(startup.textObject?.length, 1)
   const text = startup.textObject?.[0]
+  assert.ok(text instanceof TextContainerProperty)
   assert.deepEqual({
     xPosition: text?.xPosition, yPosition: text?.yPosition, width: text?.width, height: text?.height,
-    borderWidth: text?.borderWidth, borderColor: text?.borderColor, borderRadius: text?.borderRadius,
+    borderWidth: text?.borderWidth, borderColor: text?.borderColor,
     paddingLength: text?.paddingLength, containerID: text?.containerID,
     containerName: text?.containerName, content: text?.content, isEventCapture: text?.isEventCapture,
   }, {
-    xPosition: 8, yPosition: 8, width: 560, height: 272, borderWidth: 0, borderColor: 0, borderRadius: 0,
-    paddingLength: 0, containerID: 1, containerName: 'main', content: 'Starting...', isEventCapture: 1,
+    xPosition: 0, yPosition: 0, width: 576, height: 288, borderWidth: 0, borderColor: 5,
+    paddingLength: 4, containerID: 1, containerName: 'main', content: 'Starting...', isEventCapture: 1,
   })
   assert.equal(serialized.containerTotalNum, 1)
   assert.equal((serialized.textObject as unknown[])?.length, 1)
-  for (const field of ['xPosition', 'yPosition', 'width', 'height', 'borderWidth', 'borderColor', 'borderRadius',
+  for (const field of ['xPosition', 'yPosition', 'width', 'height', 'borderWidth', 'borderColor',
     'paddingLength', 'containerID', 'containerName', 'content', 'isEventCapture']) assert.notEqual(text?.[field as keyof TextContainerProperty], undefined)
   assert.equal('zOrderIndex' in (text ?? {}), false)
+  assert.equal(startup.textObject?.filter(container => container.isEventCapture === 1).length, 1)
 })
 
 test('startup phases are ordered and startup create is called only once', async () => {
@@ -228,7 +243,7 @@ test('state saves, restores valid selection, rejects broken JSON, and handles fo
 
 test('source does not reference unavailable background APIs or private shims', () => {
   const source = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8')
-  assert.doesNotMatch(source, /setBackgroundState|onBackgroundRestore|__getStateSnapshot/)
+  assert.doesNotMatch(source, /setBackgroundState|onBackgroundRestore|__getStateSnapshot|callEvenApp|widgetId|__EVEN_HUB_APP_ID__|321/)
 })
 
 test('backend distinguishes 401 from fetch network or CORS failure', async () => {

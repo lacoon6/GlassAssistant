@@ -1,6 +1,6 @@
 import {
-  type CreateStartUpPageContainer, EventSourceType, type EvenAppBridge, type EvenHubEvent,
-  OsEventTypeList, StartUpPageCreateResult, type TextContainerProperty,
+  CreateStartUpPageContainer, EventSourceType, type EvenAppBridge, type EvenHubEvent,
+  OsEventTypeList, StartUpPageCreateResult, TextContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 import { type Page, type PageAction, type PageId } from './page'
 import { ChannelPage } from './pages/channel'
@@ -24,25 +24,24 @@ interface AppSnapshot {
 }
 
 export function createMinimalStartupContainer(): CreateStartUpPageContainer {
-  const textContainer = {
-    xPosition: 8,
-    yPosition: 8,
-    width: 560,
-    height: 272,
+  const mainText = new TextContainerProperty({
+    xPosition: 0,
+    yPosition: 0,
+    width: 576,
+    height: 288,
     borderWidth: 0,
-    borderColor: 0,
-    borderRadius: 0,
-    paddingLength: 0,
+    borderColor: 5,
+    paddingLength: 4,
     containerID: 1,
     containerName: 'main',
     content: 'Starting...',
     isEventCapture: 1,
-  } as TextContainerProperty
+  })
 
-  return {
+  return new CreateStartUpPageContainer({
     containerTotalNum: 1,
-    textObject: [textContainer],
-  } as CreateStartUpPageContainer
+    textObject: [mainText],
+  })
 }
 
 export class App {
